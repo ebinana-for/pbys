@@ -1,0 +1,358 @@
+"""
+Générateur de CSV d'inférence via l'évaluateur PyTorch - 20/08/2026
+Utilise PostureDataset pour évaluer le dataset et exporte les résultats 
+au format strict C++ avec les vérités terrains (GT) associées.
+Supporte l'inférence via PyTorch (.pt) et ONNX (.onnx).
+
+Ajout : calcul des KPI frame-level (TP/TN/FP/FN/Precision/Recall/F1) selon
+EXACTEMENT la méthodologie de compute_detailed_kpis (comparison_avg_10.py) :
+seuillage ">= thresh", filtrage des frames invalides (NaN) par classe
+indépendamment, métriques calculées sur l'ensemble concaténé de toutes les
+séquences. Export en CSV (classique, inchangé) + Excel (nouveau) des KPI.
+"""
+
+import os
+import sys
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../training')))
+
+from tqdm import tqdm
+import torch
+import pickle
+import numpy as np
+import pandas as pd
+from fire import Fire
+from torch.utils.data import DataLoader
+from sklearn.metrics import f1_score, precision_score, recall_score, confusion_matrix
+
+from src.utils.config import get_config
+from src.posture.train_posture import load_model
+from src.posture.dataset.posture_dataset import PostureDataset
+from src import PROJECT_DIR
+
+
+def compute_detailed_kpis(pred_dict, label_dict, class_names, thresh=0.5):
+    """Calcule TP, FP, TN, FN, Precision, Recall et F1 pour toutes les séquences
+    confondues (concaténées), classe par classe.
+
+    Reprend EXACTEMENT la méthodologie de compute_detailed_kpis dans
+    comparison_avg_10.py :
+        - seuillage "y_pred = (probs >= thresh)" (inclusif, pas strict ">")
+        - filtrage des frames invalides (NaN) INDÉPENDANT par classe
+        - métriques calculées sur la concaténation de toutes les séquences
+
+    NOTE : la colonne 0 (correctly_seated) doit déjà être remplie dans
+    pred_dict avant l'appel (c'est fait dans run(), pas la peine de le
+    refaire ici pour éviter un calcul redondant).
+    """
+    sequence_list = list(pred_dict.keys())
+
+    all_preds = np.concatenate([pred_dict[seq] for seq in sequence_list])
+    all_labels = np.concatenate([label_dict[seq] for seq in sequence_list])
+
+    metrics = {}
+    for ii, cls in enumerate(class_names):
+        y_true = all_labels[:, ii]
+        y_pred = (all_preds[:, ii] >= thresh).astype(int)
+
+        # Ignorer les frames invalides (NaN) pour cette classe précisément
+        valid_idx = ~np.isnan(all_preds[:, ii])
+        y_true = y_true[valid_idx]
+        y_pred = y_pred[valid_idx]
+
+        if len(y_true) == 0:
+            continue
+
+        tn, fp, fn, tp = confusion_matrix(y_true, y_pred, labels=[0, 1]).ravel()
+
+        metrics[cls] = {
+            "TP": int(tp),
+            "TN": int(tn),
+            "FP": int(fp),
+            "FN": int(fn),
+            "Precision": round(precision_score(y_true, y_pred, zero_division=0), 4),
+            "Recall": round(recall_score(y_true, y_pred, zero_division=0), 4),
+            "F1_Score": round(f1_score(y_true, y_pred, zero_division=0), 4),
+            "Total_Frames": len(y_true),
+        }
+    return metrics
+
+
+def run(model_path, config, eval_side, output_dir, use_cpp_letterboxing, kpi_threshold=0.5, kpi_excel_path=None):
+    """
+    Run the evaluation of the posture model and export results to CSV with Ground Truth.
+    """
+    if not os.path.isfile(model_path):
+        raise FileNotFoundError(f"Model file not found: {model_path}")
+
+    # Injection du mode dans l'environnement pour communiquer avec PostureDataset
+    # (Méthode plus sûre que de modifier la config si celle-ci est verrouillée en lecture seule)
+    os.environ["USE_CPP_LETTERBOXING"] = "1" if use_cpp_letterboxing else "0"
+    mode_str = "RATIO C++ (Letterboxing)" if use_cpp_letterboxing else "DISTORSION (Étirement par défaut)"
+    print(f"📐 Mode Redimensionnement (Dataset) : {mode_str}")
+    if use_cpp_letterboxing:
+        print("⚠️  ATTENTION : ce mode diverge de posture_evaluation_new_metrics.py et "
+              "comparison_avg_10.py (qui utilisent tous deux le mode par défaut, sans "
+              "cette variable). Les KPI produits ici ne seront pas directement comparables "
+              "à ceux de ces deux scripts si vous activez ce flag.")
+
+    # GPU settings
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+    if output_dir is None:
+        root_dir = os.path.dirname(model_path)
+        output_dir = os.path.join(root_dir, "csv_exports_with_gt")
+    if not os.path.isdir(output_dir):
+        os.makedirs(output_dir)
+
+    is_onnx = model_path.endswith(".onnx")
+    
+    # --- CHARGEMENT DU MODÈLE (.ONNX OU .PT) ---
+    if is_onnx:
+        import onnxruntime as ort
+        print(f"⚙️ Chargement du modèle ONNX : {model_path}")
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        model = ort.InferenceSession(model_path, providers=providers)
+    else:
+        print(f"⚙️ Chargement du modèle PyTorch : {model_path}")
+        # On ajoute weights_only=False pour éviter l'erreur de sécurité de PyTorch 2.6
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+    
+        if isinstance(checkpoint, dict) and "model_state_dict" in checkpoint:
+            trained_state_dict = checkpoint["model_state_dict"]
+        elif isinstance(checkpoint, dict) and "state_dict" in checkpoint:
+            trained_state_dict = checkpoint["state_dict"]
+        else:
+            trained_state_dict = checkpoint
+        
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(
+            trained_state_dict, "module."
+        )
+        model = load_model(config)
+        model.load_state_dict(trained_state_dict)
+        model.to(device)
+        model.eval()
+
+    # Create dataloader
+    eval_dataset = PostureDataset(config, task="TEST", side=eval_side)
+    eval_loader = DataLoader(eval_dataset, batch_size=1, shuffle=False)
+
+    # Result
+    sequence_df = eval_dataset.img_df.copy()
+    sequence_df["seq_name"] = sequence_df["file"].apply(
+        lambda x: os.path.basename(os.path.dirname(x))
+    )
+    num_positive_labels = len(config.input.positive_labels)
+    
+    print("🚀 Démarrage de l'inférence sur le dataset...")
+    pred_dict, label_dict = infer(
+        eval_loader,
+        sequence_df,
+        model,
+        device,
+        cache=False,
+        num_positive_labels=num_positive_labels,
+        is_onnx=is_onnx
+    )
+
+    class_names = ["correctly_seated"] + [
+        eval_dataset.label_map[key] for key in range(num_positive_labels)
+    ]
+    
+    # --- Remplir la colonne 0 (correctly_seated) ---
+    for seq in pred_dict.keys():
+        pos_preds = pred_dict[seq][:, 1:]
+        valid_mask = ~np.isnan(pos_preds).any(axis=1)
+        pred_dict[seq][valid_mask, 0] = 1.0 - np.clip(np.nanmax(pos_preds[valid_mask], axis=1), 0, 1)
+
+    # =====================================================================
+    # CALCUL DES KPI (méthodologie identique à compute_detailed_kpis dans
+    # comparison_avg_10.py) + EXPORT EXCEL
+    # =====================================================================
+    print(f"\n📊 Calcul des KPI (seuil={kpi_threshold})...")
+    kpi_metrics = compute_detailed_kpis(pred_dict, label_dict, class_names, thresh=kpi_threshold)
+
+    df_kpi = pd.DataFrame(kpi_metrics).T
+    df_kpi.index.name = "Class"
+    df_kpi = df_kpi.reset_index()
+    # Réordonne selon l'ordre canonique des classes plutôt que l'ordre alphabétique
+    df_kpi["Class"] = pd.Categorical(df_kpi["Class"], categories=class_names, ordered=True)
+    df_kpi = df_kpi.sort_values("Class").reset_index(drop=True)
+
+    if kpi_excel_path is None:
+        kpi_excel_path = os.path.join(output_dir, "KPI_summary.xlsx")
+    df_kpi.to_excel(kpi_excel_path, index=False)
+    print(f"📊 KPI exportés (Excel) : {kpi_excel_path}")
+    print(df_kpi.to_string(index=False))
+
+    # =====================================================================
+    # EXPORT DES PRÉDICTIONS + GT EN CSV (Format strict C++) — INCHANGÉ
+    # =====================================================================
+    cpp_class_order = [
+        "closetoairbag", "legsondashboard", "torsodissimetry",           
+        "reachingback", "lateralbodycontact", "oneshoulderincontact",
+        "pelvisrotation", "pelvisdrift"
+    ]
+    
+    print(f"\n💾 Exportation des {len(pred_dict.keys())} séquences au format CSV (Pred + GT)...")
+    
+    for seq in pred_dict.keys():
+        seq_preds = pred_dict[seq]
+        seq_labels = label_dict[seq]
+        df_export = pd.DataFrame()
+        
+        df_export["index"] = np.arange(seq_preds.shape[0])
+        
+        for ii, class_name_from_model in enumerate(class_names):
+            clean_name = class_name_from_model.lower().replace("_", "").replace(" ", "")
+            final_name = "closetoairbag" if clean_name == "tooclosetoairbag" else clean_name
+                
+            df_export[final_name] = seq_preds[:, ii]
+            df_export[f"{final_name}_gt"] = seq_labels[:, ii]
+
+        for cpp_col in cpp_class_order:
+            if cpp_col not in df_export.columns:
+                df_export[cpp_col] = -1.0
+                df_export[f"{cpp_col}_gt"] = -1
+                
+        final_columns = ["index"]
+        for cpp_col in cpp_class_order:
+            final_columns.append(cpp_col)
+            final_columns.append(f"{cpp_col}_gt")
+            
+        df_export = df_export[final_columns]
+        
+        csv_out_path = os.path.join(output_dir, f"{seq}_eval_with_gt.csv")
+        df_export.to_csv(csv_out_path, index=False)
+        print(f"  -> Sauvegardé : {csv_out_path}")
+        
+    print("\n✅ Inférence et export terminés avec succès !")
+
+
+def infer(eval_loader, sequence_df, model, device, cache, num_positive_labels, is_onnx):
+    """
+    Run inference on the evaluation dataset and compute predictions and labels.
+    """
+    compute = True
+    if cache:
+        cache_dir = PROJECT_DIR / "cache"
+        if not os.path.isdir(str(cache_dir)):
+            os.makedirs(str(cache_dir))
+        cache_file = cache_dir / "posture_eval_tmp.pkl"
+        if os.path.isfile(str(cache_file)):
+            with open(str(cache_file), "rb") as handle:
+                data = pickle.load(handle)
+                pred_dict, label_dict = data
+                compute = False
+
+    if compute:
+        sequence_list = np.unique(sequence_df["seq_name"].values).tolist()
+        sequence_len = [
+            sequence_df[sequence_df["seq_name"] == name]["frame_index"].max() + 1
+            for name in sequence_list
+        ]
+        out_dim = num_positive_labels + 1
+        pred_dict = {
+            key: np.empty((nrows, out_dim), dtype=np.float64) * np.nan
+            for key, nrows in zip(sequence_list, sequence_len)
+        }
+        label_dict = {
+            key: np.zeros((nrows, out_dim), dtype=np.int64)
+            for key, nrows in zip(sequence_list, sequence_len)
+        }
+        dataloader_pbar = tqdm(
+            eval_loader, total=len(eval_loader), colour="green", leave=None
+        )
+        with torch.no_grad():
+            cnt = 0
+            for (
+                image_tensors,
+                posture_labels,
+                posture_kpts,
+                seq_name,
+                frame_idx,
+            ) in dataloader_pbar:
+                assert seq_name[0] in pred_dict, "Sequence {} not is result_dict".format(seq_name[0])
+                labels = np.squeeze(posture_labels.numpy())
+                
+                # --- INFÉRENCE HYBRIDE (ONNX ou PyTorch) ---
+                if is_onnx:
+                    input_names = [inp.name for inp in model.get_inputs()]
+                    ort_inputs = {input_names[0]: image_tensors.cpu().numpy().astype(np.float32)}
+                    
+                    if len(input_names) > 1:
+                        ort_inputs[input_names[1]] = posture_kpts.cpu().numpy().astype(np.float32)
+                        
+                    ort_outs = model.run(None, ort_inputs)
+                    pred_raw = np.squeeze(ort_outs[0])
+                    pos_probs = 1.0 / (1.0 + np.exp(-pred_raw))
+                    
+                    if pos_probs.ndim == 0:
+                        pos_probs = np.array([pos_probs])
+                    pred_dict[seq_name[0]][frame_idx.item(), 1:] = pos_probs
+                else:
+                    if model.n_inputs == 2:
+                        pred = model(image_tensors.to(device), posture_kpts.to(device))
+                    else:
+                        pred = model(image_tensors.to(device))
+                    
+                    pos_probs = np.squeeze(torch.sigmoid(pred).cpu().numpy())
+                    if pos_probs.ndim == 0:
+                        pos_probs = np.array([pos_probs])
+                    pred_dict[seq_name[0]][frame_idx.item(), 1:] = pos_probs
+                
+                label_dict[seq_name[0]][frame_idx.item(), :] = labels
+                cnt += 1
+
+        if cache:
+            data = [pred_dict, label_dict]
+            with open(str(cache_file), "wb") as handle:
+                pickle.dump(data, handle, protocol=pickle.HIGHEST_PROTOCOL)
+
+    return pred_dict, label_dict
+
+
+def main(model_path, output_dir=None, config_path=None, eval_side=None, use_cpp_letterboxing=False,
+         kpi_threshold=0.5, kpi_excel_path=None):
+    """
+    Évalue un modèle de posture sur le dataset de test et exporte les résultats avec vérités terrains.
+
+    Args:
+        model_path (str): Chemin vers le modèle (.onnx ou .pt).
+        output_dir (str, optional): Dossier d'export pour les CSV générés (et le résumé KPI Excel
+                                     par défaut, si kpi_excel_path n'est pas fourni).
+        config_path (str, optional): Chemin vers le fichier config.yaml.
+        eval_side (str, optional): Filtre anatomique ('driver', 'passenger' ou None pour les deux).
+        use_cpp_letterboxing (bool): Modifie la géométrie du tenseur. Si True, applique le respect du 
+                                     ratio C++ (bandes noires). Si False (par défaut), applique 
+                                     l'étirement/distorsion standard de l'entraînement — c'est ce mode
+                                     par défaut qui correspond à la méthodologie de
+                                     posture_evaluation_new_metrics.py / comparison_avg_10.py.
+        kpi_threshold (float): Seuil de binarisation pour le calcul des KPI (défaut 0.5, seuillage
+                                inclusif ">=", identique à compute_detailed_kpis dans comparison_avg_10.py).
+        kpi_excel_path (str, optional): Chemin du fichier Excel de résumé des KPI. Par défaut :
+                                         <output_dir>/KPI_summary.xlsx.
+    """
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    if config_path is None:
+        inference_folder = os.path.dirname(model_path)
+        config_path = os.path.join(inference_folder, "../config.yaml")
+    assert os.path.isfile(config_path), f"Config file not found: {config_path}"
+
+    config = get_config()
+    config.set_config(config_path)
+
+    possible_eval_sides = ["driver", "passenger", None]
+    if eval_side not in possible_eval_sides:
+        raise ValueError(
+            f"incorrect eval_side: {eval_side}. Must be one of: {possible_eval_sides}"
+        )
+
+    # NOTE : run() résout déjà output_dir=None -> <model_dir>/csv_exports_with_gt
+    # et crée le dossier si besoin ; pas de duplication ici.
+    run(model_path, config, eval_side, output_dir, use_cpp_letterboxing,
+        kpi_threshold=kpi_threshold, kpi_excel_path=kpi_excel_path)
+
+
+if __name__ == "__main__":
+    Fire(main)

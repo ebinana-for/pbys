@@ -1,0 +1,130 @@
+general:
+    train_dir: /mnt/data/OoP/data/source_code/training/saved_models/AgenGender/1st_training_pb_config/ckpt/epoch_100.pth
+    create_timestamp_folder: true
+train:
+    num_epoch: 100
+    optimizer: Adam
+    lr: 0.001
+    beta1: 0.9
+    rho: 0.95
+    eps: 1.0e-08
+losses:
+    BCECD:
+        lambda_cd: 1.0
+        lambda_bce: 0.0
+        epsilon: 0.01
+model:
+    name: mobilenet_v2_multi_heads
+    pretrained_backbone: null
+    checkpoint: null
+    input_channels: 1
+    width_multiplier: 0.5
+    heads_params:
+        gender:
+            out_dim: 2
+            loss: BCE
+            loss_weight: 1.0
+            loss_strategy: focal
+            ohem_start_epoch: 5
+            ohem_keep_ratio: 0.8
+        age:
+            out_dim: 1
+            loss: MSE
+            loss_weight: 0.5
+            loss_strategy: none
+            ohem_start_epoch: 5
+            ohem_keep_ratio: 0.8
+input:
+    input_height: 320
+    input_width: 320
+    batch_size: 1
+    num_workers: 8
+    weight_datasets_policy: image_weight
+    train:
+        FORVIA-NIR:
+            img_path: /mnt/data/OoP/data/private_datasets/recordings_forvia_30_01/faces_db/images
+            annot_path: /mnt/data/OoP/data/private_datasets/recordings_forvia_30_01/faces_db/forvia_face_train.csv
+            weight: 1
+        UTK-Face:
+            img_path: /mnt/data/OoP/data/public_datasets/public_datasets/UTK-Face/images
+            annot_path: /mnt/data/OoP/data/public_datasets/UTK-Face/utk_restored_random_split/utk_face_train_sanity_check1.csv
+            weight: 1
+        LAGENDA:
+            img_path: /mnt/data/OoP/data/public_datasets/Lagenda/
+            annot_path: /mnt/data/OoP/data/public_datasets/Lagenda/lagenda_annotation_train_sanity_check1.csv
+            weight: 1
+        IMDB:
+            img_path: /mnt/data/OoP/data/public_datasets/imdb-clean/data/imdb/
+            annot_path: /mnt/data/OoP/data/public_datasets/IMDB/annotations/imdb_train_new_sanity_check1.csv
+            weight: 1
+    test:
+        UTK-Face:
+            img_path: /mnt/data/OoP/data/public_datasets/UTK-Face/images
+            annot_path: /mnt/data/OoP/data/public_datasets/UTK-Face/utk_restored_random_split/utk_face_test_sanity_check1.csv
+        LAGENDA:
+            img_path: /mnt/data/OoP/data/public_datasets/Lagenda/
+            annot_path: /mnt/data/OoP/data/public_datasets/Lagenda/lagenda_annotation_test_sanity_check1.csv
+            weight: 1
+        IMDB:
+            img_path: /mnt/data/OoP/data/public_datasets/imdb-clean/data/imdb/
+            annot_path: /mnt/data/OoP/data/public_datasets/imdb-clean/IMDB/imdb_test_new_sanity_check1.csv
+            weight: 1
+    data_augmentations:
+        train:
+            pipeline:
+                p: 1.0
+                box_ops:
+                    ShiftBox:
+                        shift: 0.1
+                        p: 1.0
+                    ScaleBox:
+                        scale_min: 0.0
+                        scale_max: 0.5
+                        p: 1.0
+                    RotateBox:
+                        min_angle: -1
+                        max_angle: 1
+                        p: 0.0
+                albumentation_ops:
+                    OpticalDistortion:
+                        distort_limit: 0.3
+                        p: 0.5
+                    ColorJitter:
+                        brightness: 0.4
+                        contrast: 0.4
+                        saturation: 0.7
+                        hue: 0.5
+                        p: 0.3
+                    HorizontalFlip:
+                        p: 0.5
+                    LongestMaxSize:
+                        max_size_hw: (320,320)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 320
+                        min_width: 320
+                        p: 1.0
+                custom_ops:
+                    ExtractRChannel:
+                        p: 1.0
+        test:
+            pipeline:
+                p: 1.0
+                box_ops:
+                    ScaleBox:
+                        scale_min: 0.7
+                        scale_max: 0.7
+                        p: 1.0
+                albumentation_ops:
+                    LongestMaxSize:
+                        max_size_hw: (224,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 320
+                        min_width: 320
+                        p: 1.0
+                custom_ops:
+                    ExtractRChannel:
+                        p: 1.0
+eval:
+    nb_imgs_in_tensorboard: 9

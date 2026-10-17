@@ -1,0 +1,5 @@
+In this folder we are doing all the python inference part
+ 
+ At the time of writing theres 3 parts first ppython_inference which mimick the inference on an onnx file 
+ the teh v2 which first convert it to param then does the inference this one is quite indentic as the c++
+ and third is the inference val this one was pushed by jin in order to have an inference continusly by the evaluation sid and on this one we can guess a lot of metrics 

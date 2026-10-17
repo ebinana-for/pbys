@@ -1,0 +1,12 @@
+README.md
+setup.py
+./src/__init__.py
+./src/create_calibration_img.py
+./src/main_on_video_age_gender.py
+./src/main_on_video_posture.py
+forvia_oms.egg-info/PKG-INFO
+forvia_oms.egg-info/SOURCES.txt
+forvia_oms.egg-info/dependency_links.txt
+forvia_oms.egg-info/not-zip-safe
+forvia_oms.egg-info/requires.txt
+forvia_oms.egg-info/top_level.txt

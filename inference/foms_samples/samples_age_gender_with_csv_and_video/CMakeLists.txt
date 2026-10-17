@@ -1,0 +1,1 @@
+add_target_application_ti(samples_age_gender_with_csv_and_video foms_age_gender)

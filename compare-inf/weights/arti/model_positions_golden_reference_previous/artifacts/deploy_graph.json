@@ -1,0 +1,66 @@
+{
+  "nodes": [
+    {
+      "op": "null", 
+      "name": "imagesNet_IN", 
+      "inputs": []
+    }, 
+    {
+      "op": "tvm_op", 
+      "name": "tidl_0", 
+      "attrs": {
+        "flatten_data": "0", 
+        "func_name": "tidl_0", 
+        "out_layout": "", 
+        "data_layout": "NCHW", 
+        "layout": "NCHW", 
+        "hash": "6f0f5b875a5f774e", 
+        "kernel_layout": "OIHW", 
+        "num_outputs": "1", 
+        "num_inputs": "1", 
+        "global_symbol": "tidl_0", 
+        "Compiler": "tidl"
+      }, 
+      "inputs": [
+        [
+          0, 
+          0, 
+          0
+        ]
+      ]
+    }
+  ], 
+  "arg_nodes": [0], 
+  "heads": [
+    [
+      1, 
+      0, 
+      0
+    ]
+  ], 
+  "attrs": {
+    "dltype": [
+      "list_str", 
+      [
+        "uint8", 
+        "float32"
+      ]
+    ], 
+    "device_index": [
+      "list_int", 
+      [1, 1]
+    ], 
+    "storage_id": [
+      "list_int", 
+      [0, 1]
+    ], 
+    "shape": [
+      "list_shape", 
+      [
+        [1, 1, 256, 192], 
+        [1, 8]
+      ]
+    ]
+  }, 
+  "node_row_ptr": [0, 1, 2]
+}

@@ -1,0 +1,28 @@
+input:
+  train:
+    UTK-Face:
+      img_path: /data/public_datasets/UTK-Face/images
+      annot_path: /data/public_datasets/UTK-Face/utk_restored_random_split/utk_face_train.csv
+    LAGENDA:
+      img_path: /data/public_datasets/Lagenda/
+      annot_path: /data/public_datasets/Lagenda/lagenda_annotation.csv
+    IMDB:
+      img_path: /data/public_datasets/imdb-clean/data/imdb/
+      annot_path: /data/public_datasets/IMDB/annotations/imdb_train_new.csv
+    FairFace:
+      img_path: /data/public_datasets/FairFace/images/
+      annot_path: /data/public_datasets/FairFace/annotations/train_annotations.csv
+  val:
+    IMDB:
+      img_path: /data/public_datasets/imdb-clean/data/imdb/
+      annot_path: /data/public_datasets/IMDB/annotations/imdb_valid_new.csv
+    FairFace:
+      img_path: /data/public_datasets/FairFace/images/
+      annot_path: /data/public_datasets/FairFace/annotations/val_annotations.csv
+  test:
+    UTK-Face:
+      img_path: /data/public_datasets/UTK-Face/images
+      annot_path: /data/public_datasets/UTK-Face/utk_restored_random_split/utk_face_test.csv
+    IMDB:
+      img_path: /data/public_datasets/imdb-clean/data/imdb/
+      annot_path: /data/public_datasets/IMDB/annotations/imdb_test_new.csv

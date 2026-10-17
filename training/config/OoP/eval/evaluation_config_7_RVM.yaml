@@ -1,0 +1,111 @@
+general:
+    train_dir: /mnt/data/OoP/data/source_code/forvia-oms-1.0.0/saved_models/2026-07-24T10h21m58s
+    create_timestamp_folder: true
+train:
+    num_epoch: 100
+    optimizer: AdamW
+    lr: 0.0005
+    weight_decay: 0.05
+    beta1: 0.9
+    rho: 0.95
+    eps: 1.0e-08
+model:
+    name: mobilenet_v2
+    input_channels: 1
+    pretrained_backbone: null
+    checkpoint: null
+    width_multiplier: 0.5
+    heads_params:
+        head1:
+            out_dim: 8
+            loss: BCE
+            loss_strategy: none
+input:
+    input_height: 256
+    input_width: 192
+    batch_size: 32
+    num_workers: 8
+
+    test:
+        dataset1:
+            img_path: /mnt/data/OoP/data/evaluation_7_RVM/test/images
+            annot_path: /mnt/data/OoP/data/evaluation_7_RVM/test/labels
+            kpts_path: /mnt/data/OoP/data/evaluation_7_RVM/test/keypoints
+            
+    positive_labels:
+    - Too_close_to_airbag
+    - Legs_on_dashboard
+    - Torso_dissimetry
+    - Reaching_back
+    - Lateral_body_contact
+    - One_shoulder_in_contact
+    - Pelvis rotation
+    - Pelvis_drift
+    negative_labels:
+    - Rounded_back
+    - Looking_left_right
+    - Looking_back
+    - Looking_straight
+    - Correctly_seated
+    discard_labels:
+    - Buttock forward
+    one_hot_label: true
+    minority_class_min_ratio: 0.5
+    draw_keypoints: false
+    data_augmentations:
+        train:
+            pipeline:
+                p: 1.0
+                box_ops:
+                    ShiftBox:
+                        shift: 0.05
+                        p: 1.0
+                    ScaleBox:
+                        scale_min: -0.05
+                        scale_max: 0.05
+                        p: 1.0
+                albumentation_ops:
+                    ColorJitter:
+                        brightness: 0.4
+                        contrast: 0.4
+                        saturation: 0.7
+                        hue: 0.5
+                        p: 0.6
+                    CoarseDropout:
+                        max_holes: 3
+                        max_height: 40
+                        max_width: 40
+                        min_holes: 1
+                        min_height: 10
+                        min_width: 10
+                        fill_value: 0
+                        p: 0.5
+                    LongestMaxSize:
+                        max_size_hw: (256,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 256
+                        min_width: 192
+                        p: 1.0
+                custom_ops:
+                    ImgKptsHorizontalFlip:
+                        p: 0.5
+                    ImgKptsNormalize:
+                        p: 1.0
+        test:
+            pipeline:
+                p: 1.0
+                box_ops: null
+                albumentation_ops:
+                    LongestMaxSize:
+                        max_size_hw: (256,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 256
+                        min_width: 192
+                        p: 1.0
+                custom_ops:
+                    ImgKptsNormalize:
+                        p: 1.0
+eval:
+    nb_imgs_in_tensorboard: 9

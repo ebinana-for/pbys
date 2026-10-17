@@ -1,0 +1,7 @@
+Checks: 'bugprone-*,cert-*,clang-analyzer-*,concurrency-*,cppcoreguidelines-*,misc-*,readability-*,performance-*,modernize-*,boost-use-to-string,google-explicit-constructor,google-global-names-in-headers,modernize-avoid-bind,readability-const-return-type,readability-make-member-function-const,-abseil-*,-misc-non-private-member-variables-in-classes,-readability-avoid-const-params-in-decls,-readability-magic-numbers,-cert-err58-cpp,-concurrency-mt-unsafe,-readability-convert-member-functions-to-static,-cppcoreguidelines-avoid-magic-numbers,-cppcoreguidelines-owning-memory,-cppcoreguidelines-avoid-do-while,-cppcoreguidelines-pro-bounds-pointer-arithmetic,-cppcoreguidelines-pro-type-vararg,-readability-named-parameter,-readability-identifier-length,-cppcoreguidelines-avoid-c-arrays,-cppcoreguidelines-pro-bounds-array-to-pointer-decay,-cppcoreguidelines-avoid-const-or-ref-data-members,-cppcoreguidelines-macro-usage,-bugprone-easily-swappable-parameters,-bugprone-macro-parentheses,-modernize-use-trailing-return-type,-modernize-use-nodiscard,-modernize-use-auto,-readability-redundant-member-init'
+
+WarningsAsErrors: 'bugprone-*,cert-*,clang-analyzer-*,concurrency-*,cppcoreguidelines-*,misc-*,readability-*,performance-*,modernize-*,boost-use-to-string,google-explicit-constructor,google-global-names-in-headers'
+
+HeaderFilterRegex: '.*\/pln_.*\.h'
+
+CheckOptions: [{ key: 'readability-function-cognitive-complexity.IgnoreMacros', value: true }]

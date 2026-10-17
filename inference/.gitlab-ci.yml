@@ -1,0 +1,87 @@
+variables:
+  GIT_STRATEGY: fetch
+  GIT_DEPTH: 1
+
+include:
+  - project: devops/cpp-devops
+    file: ci-templates/Cpp.gitlab-ci.yml
+    ref: 7.x
+
+stages:
+  - build
+  - test
+
+default:
+  before_script:
+    - bash -c env
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y libopencv-dev zip libprotobuf-dev protobuf-compiler libprotoc-dev graphviz swig curl vim git wget gdb nano zip pkg-config libgtk-3-dev libyaml-cpp-dev
+    - source install_dlti_host_x86_target_am62a.sh
+ 
+# ------------------------------------
+# Build
+# ------------------------------------
+cpp::build:
+  extends: .cpp::build
+  tags:
+    - docker
+  variables:
+    SOC: 'am62a'
+    TIDL_TOOLS_TYPE: 'CPU' 
+# ------------------------------------
+# Test
+# ------------------------------------
+
+cpp::test::unit+integ:
+  extends: [".cpp::test::unit+integ"]
+  tags:
+    - docker
+  variables:
+    SOC: 'am62a'
+    TIDL_TOOLS_TYPE: 'CPU'
+# -----------------------------------------
+# Validations
+# -----------------------------------------
+
+cpp::tidy::custom:
+  extends: .cpp::build
+  stage: test
+  variables:
+    BUILD_DIR: "tidy-build"
+    CLANG_TIDY_CHECK: "ON"
+    CLANG_TIDY_CONFIG_FILE_NAME: ".clang-tidy"
+    DEFAULT_CLANG_TIDY_CONFIG_FILE: "${CI_PROJECT_DIR}/${CLANG_TIDY_CONFIG_FILE_NAME}"
+    CLANG_TIDY_CONFIG_FILE: "${DEFAULT_CLANG_TIDY_CONFIG_FILE}"
+    CLANG_TIDY_OPTIONS: "clang-tidy;--extra-arg=--std=c++17"
+    SOC: 'am62a'
+    TIDL_TOOLS_TYPE: 'CPU'
+
+  before_script:
+    - bash -c env
+    - apt-get update
+    - DEBIAN_FRONTEND=noninteractive apt-get install -y libopencv-dev zip libprotobuf-dev protobuf-compiler libprotoc-dev graphviz swig curl vim git wget gdb nano zip pkg-config libgtk-3-dev libyaml-cpp-dev
+    - source install_dlti_host_x86_target_am62a.sh
+    # Add a symbolic link in the project root directory to the clang-tidy configuration file
+    - if [ ! -f "${DEFAULT_CLANG_TIDY_CONFIG_FILE}" ] && [ "${DEFAULT_CLANG_TIDY_CONFIG_FILE}" != "${CLANG_TIDY_CONFIG_FILE}" ];
+      then
+      pushd "${CI_PROJECT_DIR}" ;
+      ln -s "${CLANG_TIDY_CONFIG_FILE}" "${CLANG_TIDY_CONFIG_FILE_NAME}" ;
+      popd ;
+      fi
+
+  tags:
+    - docker
+
+
+  
+cpp::sonar:
+  needs: ["cpp::test::unit+integ"]
+  extends: .cpp::sonar
+  tags:
+    - docker
+  variables:
+    SONAR_EXCLUSIONS: build,docs,html_doc,cmake,.vscode,external,data
+    SONAR_SOURCES: foms_common/src,foms_common/include, foms_age_gender/src,foms_age_gender/include,foms_positions/src,foms_positions/include
+    SONAR_TESTS: foms_common/test,foms_age_gender/test,foms_positions/test
+    SOC: 'am62a'
+    TIDL_TOOLS_TYPE: 'CPU'

@@ -1,0 +1,151 @@
+general:
+  train_dir: /mnt/data/OoP/data/source_code/training/saved_models/AgenGender
+  create_timestamp_folder: true
+  seed: 42
+
+train:
+  num_epoch: 100 #number of iterations to train for
+  optimizer: Adam # Use optimizer Adadelta|SGD|Adam|AdamW
+  lr: 0.001 # learning rate, default=1.0 for Adadelta
+  beta1: 0.9 # beta1 for adam. default=0.9
+  rho: 0.95 # decay rate rho for Adadelta. default=0.95
+  eps: 0.00000001 # eps for Adadelta. default=1e-8
+
+losses:
+  BCECD:
+    lambda_cd: 1.0 # weight for the Conformal Discriminative Loss part
+    lambda_bce: 0.0 # weight for the Conformal Discriminative Loss part
+    epsilon: 0.01
+
+# Model config
+model:
+  name: mobilenet_v2_multi_heads # valid models: 
+                                 # mobilenet_v2_multi_heads, mobilenet_v3_multi_heads, 
+                                 # edgevit_xxs_multi_heads, edgevit_xs_multi_heads, edgevit_s_multi_heads,
+                                 # efficientvit_xxs_multi_heads, efficientvit_xs_multi_heads, efficientvit_s_multi_heads
+  pretrained_backbone: null # imagenet #/mnt/data/jdefretin/Forvia/saved_pretrained_models/2024-12-17T09h31m25s/ckpt/epoch_50.pth
+  checkpoint: null
+  input_channels: 1
+  width_multiplier: 0.5
+  heads_params: 
+    gender: # valid names: gender, age 
+      out_dim: 2
+      loss: BCE
+      loss_weight: 1.0
+      loss_strategy: focal   # For BCE: ohem, focal, or none ; For MSE: ohem or none
+      ohem_start_epoch: 5   # Applied only if loss_strategy=ohem
+      ohem_keep_ratio: 0.8  # Applied only if loss_strategy=ohem
+    age: 
+      out_dim: 1            # 1 for regression, 120 for classification
+      loss: MSE             # MSE for regression ; BCE or BCECD for classification
+      loss_weight: 0.5      # 0.5 for regression, 1.0 for classification (suggested values)
+      loss_strategy: none   # For BCE: ohem, focal, or none ; For MSE: ohem or none ; For BCECD: none
+      ohem_start_epoch: 5   # Applied only if loss_strategy=ohem
+      ohem_keep_ratio: 0.8  # Applied only if loss_strategy=ohem
+
+input:
+  input_height: 224
+  input_width: 192
+  batch_size: 128 # input batch size
+  num_workers: 16 # number of data loading workers. Use -1 to use all cores.
+  weight_datasets_policy: image_weight
+  train:
+    FORVIA-NIR: 
+      img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/faces_db/images
+      annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/faces_db/forvia_face_train.csv
+      weight: 2   
+    UTK-Face: 
+      img_path: /home/irystec/Desktop/public_datasets/UTK-Face/images
+      annot_path: /home/irystec/Desktop/public_datasets/UTK-Face/utk_restored_random_split/utk_face_train_sanity_check1.csv
+      weight: 1
+    LAGENDA: 
+      img_path: /home/irystec/Desktop/public_datasets/Lagenda/
+      annot_path: /home/irystec/Desktop/public_datasets/Lagenda/lagenda_annotation_sanity_check1.csv
+      weight: 1
+    IMDB: 
+      img_path: /home/irystec/Desktop/public_datasets/imdb-clean/data/imdb/
+      annot_path: /home/irystec/Desktop/public_datasets/imdb-clean/IMDB/imdb_train_new_sanity_check1.csv
+      weight: 1
+    # FairFace: 
+    #   img_path: /data/public_datasets/FairFace/images/
+    #   annot_path: /data/public_datasets/FairFace/annotations/train_annotations_sanity_check.csv
+    #   weight: 1
+  
+  test:
+    FORVIA-NIR: 
+      img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/faces_db/images
+      annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/faces_db/forvia_face_test.csv
+    UTK-Face:
+      img_path: /home/irystec/Desktop/public_datasets/UTK-Face/images
+      annot_path: /home/irystec/Desktop/public_datasets/UTK-Face/utk_restored_random_split/utk_face_test_sanity_check1.csv
+    IMDB: 
+      img_path: /home/irystec/Desktop/public_datasets/imdb-clean/data/imdb/
+      annot_path: /home/irystec/Desktop/public_datasets/imdb-clean/IMDB/imdb_test_new_sanity_check1.csv
+    # FairFace: 
+    #   img_path: /data/public_datasets/FairFace/images/
+    #   annot_path: /data/public_datasets/FairFace/annotations/val_annotations_sanity_check.csv
+
+  data_augmentations:
+    train:
+      pipeline:
+          p: 1.0
+          box_ops:
+            ShiftBox:
+              shift: 0.1
+              p: 1.0
+            ScaleBox:
+              scale_min: 0.0
+              scale_max: 0.5
+              p: 1.0
+            RotateBox:
+              min_angle: -1
+              max_angle: 1
+              p: 0.0
+          albumentation_ops:
+            OpticalDistortion:
+              distort_limit: 0.3
+              p: 0.5
+            ColorJitter:
+              brightness: 0.4
+              contrast: 0.4
+              saturation: 0.7
+              hue: 0.5
+              p: 0.3
+            HorizontalFlip:
+              p: 0.5
+            LongestMaxSize:
+              max_size_hw: (224,192)
+              p: 1.0
+            PadIfNeeded:
+              min_height: 224
+              min_width: 192
+              p: 1.0
+            # HistogramMatching:
+            #   reference_images:
+            #     - ressources/nir1.png
+            #   p: 0.5
+            #Resize:
+            #  height: 224
+            #  width: 224
+            #  p: 1.0
+          custom_ops:
+            ExtractRChannel:
+              p: 1.0
+    test:
+      pipeline:
+        p: 1.0
+        box_ops:
+        albumentation_ops:
+          LongestMaxSize:
+            max_size_hw: (224,192)
+            p: 1.0
+          PadIfNeeded:
+            min_height: 224
+            min_width: 192
+            p: 1.0
+        custom_ops:
+          ExtractRChannel:
+            p: 1.0
+eval:
+  nb_imgs_in_tensorboard: 9
+

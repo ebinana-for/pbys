@@ -1,0 +1,57 @@
+general:
+  test_dir: /mnt/data/OoP/data/source_code/training/saved_evals/AgenGender
+  create_timestamp_folder: true
+  non_public_video_path: /data/evals/age_gender/aggregate_eval_set_only_forvia
+
+# Model config
+model:
+  checkpoint: /mnt/data/OoP/data/source_code/training/saved_models/AgenGender/1st_training_pb_config/ckpt/epoch_100_batch_64_fuse.onnx
+  heads_params:
+    gender: # valid names: gender, age
+      out_dim: 2
+      loss: BCE
+    age:
+      out_dim: 1      # 1 for regression, 116 for classification
+      loss: MSE           # MSE for regression, BCE for classification
+      center_reduce: false
+
+input:
+  input_height: 224
+  input_width: 192
+  batch_size: 64 # input batch size
+  num_workers: 1 # number of data loading workers. Use -1 to use all cores.
+  test:
+    UTK-Face:
+        img_path: /mnt/data/OoP/data/public_datasets/UTK-Face/images
+        annot_path: /mnt/data/OoP/data/public_datasets/UTK-Face/utk_restored_random_split/utk_face_test_sanity_check1.csv
+        return_ethnicity: true # only available for UTK-Face
+        weight: 1
+    LAGENDA:
+        img_path: /mnt/data/OoP/data/public_datasets/Lagenda/
+        annot_path: /mnt/data/OoP/data/public_datasets/Lagenda/lagenda_annotation_test_sanity_check1.csv
+        weight: 1
+    IMDB:
+        img_path: /mnt/data/OoP/data/public_datasets/imdb-clean/data/imdb/
+        annot_path: /mnt/data/OoP/data/public_datasets/imdb-clean/IMDB/imdb_train_new_sanity_check1.csv
+        weight: 1
+
+  data_augmentations:
+    test:
+      pipeline:
+        p: 1.0
+        box_ops:
+          ScaleBox:
+            scale_min: 0.25
+            scale_max: 0.25
+            p: 1.0
+        albumentation_ops:
+          LongestMaxSize:
+            max_size_hw: (224,192)
+            p: 1.0
+          PadIfNeeded:
+            min_height: 224
+            min_width: 192
+            p: 1.0
+        custom_ops:
+          ExtractRChannel:
+            p: 1.0

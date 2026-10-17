@@ -1,0 +1,1 @@
+add_target_application_ti(samples_positions_with_csv_and_video foms_positions samples_utils)

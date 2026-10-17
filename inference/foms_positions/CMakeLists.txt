@@ -1,0 +1,1 @@
+add_library_target_ti(foms_positions foms_common )

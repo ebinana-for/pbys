@@ -1,0 +1,30 @@
+Seeeding training journal 
+
+La sortie te dit exactement quelque chose de très important :
+
+mêmes inputs
+même labels
+même logits
+même loss
+mais poids différents dès le point de divergence
+
+Autrement dit, le problème n’est pas le dataset, ni le seed du batch, ni le forward.
+Le divergence arrive au niveau du calcul de gradient 
+
+le fait qu e mes steps darret soit different en terme de nb nest pas bizzare completement Ig mais cela prouve que le deterministe pour ce modele n'est pas forcement possible further investigation will determine how close to reproductibility we can get 
+
+le test sur cpu sur 100 steps confirme que tout ser passe bien et quil ny a pas de divergence ainsi 
+
+La conclusion la plus solide est :
+
+le code de génération des batches est reproductible
+les logits sont reproductibles
+le loss est reproductible
+la divergence apparaît uniquement dans le calcul de mise à jour des poids sur GPU
+Autrement dit :
+
+ce n’est pas un “seeding bug”
+ce n’est pas un problème d’ordre de lecture des images
+c’est un problème de stabilité numérique sur GPU
+
+Mon interprétation : la zone suspecte est le backward entre la projection finale et la partie depthwise du bloc 3. Cela ne prouve pas encore que la convolution depthwise est responsable : cette partie contient aussi BatchNorm et ReLU6.

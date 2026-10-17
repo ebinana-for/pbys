@@ -1,0 +1,7 @@
+onnx and artifacts are both different type of inference, 
+the onnx one is based on the onnxthat is the direct descendance of the pth file fromm python
+
+
+the artifacts one is the compiled version on ai-edge-tool for 
+the TI embedded version it gives us basically the same results as 
+whats on the C++ inference PC version 

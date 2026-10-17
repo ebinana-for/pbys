@@ -1,0 +1,45 @@
+# --- PYTHON & SYSTEM ---
+__pycache__/
+.ipynb_checkpoints/
+.conda/
+env/
+
+# --- DONNÉES ET VIDÉOS ---
+data/
+**/data/
+*.mp4
+*.avi
+*.mov
+forvia4testset/
+eval_cpp_assets/
+output_eval_datasets/
+
+# --- MODÈLES ET RÉSULTATS D'ENTRAÎNEMENT ---
+saved_models/
+runs/
+outputs/
+*.tfevents.*
+*.pt
+*.pth
+*.onnx
+
+# --- OUTILS EXTERNES ET ARCHIVES ---
+inference/external/
+*.tar.xz
+*.tar.gz
+*.zip
+
+# --- FICHIERS COMPILÉS ET BINAIRES ---
+*.so
+*.dll
+*.dylib
+
+# --- IMAGES DE TEST ET CORRUPTION ---
+corrupted_files/
+seed_corrupted_images/
+bubu/
+
+# --- NOTEBOOKS & RESULTATS ---
+*.ipynb
+.ipynb_checkpoints/
+*.csv

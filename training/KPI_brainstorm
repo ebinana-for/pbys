@@ -1,0 +1,6 @@
+out all frames how many are class1 class2 , FP and FP2
+see the code for the evaluation to understand the metrics 
+check with metrics make sense or not 
+run the binaries onnx evaluation 
+How they run the eval on the sliding window result???
+look into the source code 1st priority : recall, FP, ...

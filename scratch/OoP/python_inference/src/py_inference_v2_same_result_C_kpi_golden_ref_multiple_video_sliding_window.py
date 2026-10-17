@@ -1,0 +1,441 @@
+"""Run posture model inference on multiple video files (auto-detects tracking CSV) and export predictions.
+
+Ce script imite le pipeline C++ embarqué (vérifié ligne à ligne contre
+foms_positions.cpp, samples_positions_evaluation.cpp et foms_positions_aggregation.hpp) : 
+crop avec marge de 10% en largeur uniquement, letterbox proportionnel, padding noir centré, interpolation INTER_LINEAR.
+
+Modifié pour supporter :
+- Le traitement par lot (dossier contenant plusieurs vidéos)
+- Le LISSAGE TEMPOREL (Sliding Window de 20 frames divisé par 20) pour imiter le C++
+- Le calcul de KPI par vidéo
+- Le calcul d'une métrique GLOBALE finale via concaténation
+"""
+
+# This model is working with both fp32 and int8 , it can give you really close results to 
+# the C++ output but some really similar that are not exactly the same too 
+
+import os
+import sys
+import glob
+import cv2
+import torch
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+from fire import Fire
+from collections import deque
+from sklearn.metrics import precision_score, recall_score, f1_score, confusion_matrix
+
+# Remonte à la racine source_code puis redescend dans training pour trouver 'src'
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../training')))
+from src.utils.config import get_config
+from src.posture.train_posture import load_model
+
+# Pour tous mes codes, j'utilise des environnements Conda.
+# Never remove my personal comments from the code.
+
+# Ordre canonique des classes, réutilisé pour l'export prédictions ET les KPI.
+CPP_CLASS_ORDER = [
+    "closetoairbag",
+    "legsondashboard",
+    "torsodissimetry",
+    "reachingback",
+    "lateralbodycontact",
+    "oneshoulderincontact",
+    "pelvisrotation",
+    "pelvisdrift",
+]
+
+# === CONSTANTES CALQUÉES SUR LE C++ (foms_positions_aggregation.hpp) ===
+BUFFER_SIZE = 20
+
+def _compute_kpi_for_dataframe(df_merged, sequence_name, threshold, cpp_class_order):
+    """Fonction utilitaire pour calculer les KPIs sur un DataFrame mergé"""
+    kpi_rows = []
+    for cls in cpp_class_order:
+        col_gt = f"{cls}_gt"
+        if col_gt not in df_merged.columns or cls not in df_merged.columns:
+            continue
+
+        gt_full = df_merged[col_gt]
+        pred_full = df_merged[cls]
+
+        # Frames invalides marquées par -1, exclues indépendamment pour chaque classe.
+        valid_mask = (gt_full != -1) & (pred_full != -1.0)
+        gt_valid = gt_full[valid_mask]
+        pred_probs = pred_full[valid_mask]
+
+        if len(gt_valid) == 0:
+            continue
+
+        y_pred = (pred_probs >= threshold).astype(int)
+        tn, fp, fn, tp = confusion_matrix(gt_valid, y_pred, labels=[0, 1]).ravel()
+
+        kpi_rows.append({
+            "Sequence": sequence_name,
+            "Class": cls,
+            "TP": int(tp),
+            "TN": int(tn),
+            "FP": int(fp),
+            "FN": int(fn),
+            "Precision": round(precision_score(gt_valid, y_pred, zero_division=0), 4),
+            "Recall": round(recall_score(gt_valid, y_pred, zero_division=0), 4),
+            "F1_Score": round(f1_score(gt_valid, y_pred, zero_division=0), 4),
+            "Total_Frames": len(gt_valid),
+        })
+    return kpi_rows
+
+
+def compute_kpis_from_merged_dict(merged_dfs_dict, threshold=0.5, cpp_class_order=None):
+    """
+    Calcule les KPI (TP/TN/FP/FN/Precision/Recall/F1) par classe et par vidéo, 
+    puis ajoute une métrique GLOBALE sur la concaténation de toutes les vidéos.
+    """
+    if cpp_class_order is None:
+        cpp_class_order = CPP_CLASS_ORDER
+
+    all_kpi_rows = []
+    
+    # 1. Calculs par vidéo
+    for seq_name, df_merged in merged_dfs_dict.items():
+        all_kpi_rows.extend(
+            _compute_kpi_for_dataframe(df_merged, seq_name, threshold, cpp_class_order)
+        )
+
+    # 2. Calcul GLOBALE
+    if merged_dfs_dict:
+        global_df = pd.concat(list(merged_dfs_dict.values()), ignore_index=True)
+        all_kpi_rows.extend(
+            _compute_kpi_for_dataframe(global_df, "GLOBAL", threshold, cpp_class_order)
+        )
+
+    return pd.DataFrame(all_kpi_rows)
+
+
+def run_video_inference(model_path, video_path, with_tatoo_keypoints, output_csv, model, session, dlr_model, device, input_names, output_name, config, cpp_class_order, class_names):
+    """
+    Run inference on a single video frame by frame. Automatically loads the associated 
+    tracking CSV to crop the person, applies temporal smoothing, and exports posture predictions.
+    """
+    video_base_path = os.path.splitext(video_path)[0]
+    input_csv = f"{video_base_path}.csv"
+    
+    if not os.path.isfile(input_csv):
+        print(f"⚠️ CSV de tracking introuvable pour {os.path.basename(video_path)}. Ignoré.")
+        return None
+
+    df_input = pd.read_csv(input_csv)
+    cap = cv2.VideoCapture(video_path)
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    
+    print(f"\n🎥 Traitement de la vidéo : {os.path.basename(video_path)} ({total_frames} frames)")
+    
+    img_height = 256
+    img_width = 192
+    results = []
+    
+    is_dlr = dlr_model is not None
+    is_onnx = session is not None
+
+    # === INITIALISATION DES BUFFERS TEMP (C++ REPLICA) ===
+    # En C++, le buffer est initialisé avec des zéros. 
+    temporal_buffers = {cls: deque([0.0]*BUFFER_SIZE, maxlen=BUFFER_SIZE) for cls in cpp_class_order}
+
+    frame_idx = 0
+    max_iterations = min(total_frames, len(df_input))
+    pbar = tqdm(total=max_iterations, colour="blue", desc="Inférence")
+    
+    with torch.no_grad():
+        while frame_idx < max_iterations:
+            ret, frame = cap.read()
+            if not ret:
+                break 
+
+            image_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+            row = df_input.iloc[frame_idx]
+            
+            val_x = row.get('/trackingState/occupants/0/boundingBox/upperLeft/0', 0)
+            val_y = row.get('/trackingState/occupants/0/boundingBox/upperLeft/1', 0)
+            val_w = row.get('/trackingState/occupants/0/boundingBox/width', image_gray.shape[1])
+            val_h = row.get('/trackingState/occupants/0/boundingBox/height', image_gray.shape[0])
+
+            # === GESTION DE LA PERTE DE TRACKING ===
+            if pd.isna(val_x) or pd.isna(val_y) or pd.isna(val_w) or pd.isna(val_h):
+                frame_data = {"index": frame_idx}
+                for class_name in cpp_class_order:
+                    frame_data[class_name] = -1.0
+                    # Le C++ efface et remplit de zéro en cas de perte (reset_estimator)
+                    temporal_buffers[class_name] = deque([0.0]*BUFFER_SIZE, maxlen=BUFFER_SIZE)
+                results.append(frame_data)
+                frame_idx += 1
+                pbar.update(1)
+                continue 
+
+            x = int(float(val_x))
+            y = int(float(val_y))
+            w = int(float(val_w))
+            h = int(float(val_h))
+
+            x1, y1 = max(0, x), max(0, y)
+            x2, y2 = min(image_gray.shape[1], x + w), min(image_gray.shape[0], y + h)
+            
+            delta_width = int(0.1 * float(x2 - x1))
+            x1_margin = max(0, x1 - delta_width)
+            x2_margin = min(image_gray.shape[1] - 1, x2 + delta_width)
+
+            if x2_margin > x1_margin and y2 > y1:
+                roi_img = image_gray[y1:y2, x1_margin:x2_margin]
+            else:
+                roi_img = image_gray 
+
+            roi_height, roi_width = roi_img.shape[:2]
+            scalex = img_width / float(roi_width)
+            scaley = img_height / float(roi_height)
+            scale = min(scalex, scaley)
+            
+            dst_cols = int(round(roi_width * scale))
+            dst_rows = int(round(roi_height * scale))
+            
+            resized_img = cv2.resize(roi_img, (dst_cols, dst_rows), interpolation=cv2.INTER_LINEAR)
+            
+            top = int((img_height - dst_rows) / 2)
+            bottom = img_height - top - dst_rows
+            right = int((img_width - dst_cols) / 2)
+            left = img_width - right - dst_cols
+            
+            final_img = cv2.copyMakeBorder(resized_img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=0)
+
+            if with_tatoo_keypoints:
+                keyPointsLines = [
+                    (5, 6), (7, 5), (8, 6), (9, 7), (10, 8),
+                    (11, 5), (12, 6), (12, 11), (12, 14), (11, 13)
+                ]
+                
+                c_plus_plus_y_offset = bottom 
+                
+                for kp1_idx, kp2_idx in keyPointsLines:
+                    c1_x = f'/trackingState/occupants/0/bodyKeyPoints/{kp1_idx}/value/0'
+                    c1_y = f'/trackingState/occupants/0/bodyKeyPoints/{kp1_idx}/value/1'
+                    c1_q = f'/trackingState/occupants/0/bodyKeyPoints/{kp1_idx}/quality'
+                    
+                    c2_x = f'/trackingState/occupants/0/bodyKeyPoints/{kp2_idx}/value/0'
+                    c2_y = f'/trackingState/occupants/0/bodyKeyPoints/{kp2_idx}/value/1'
+                    c2_q = f'/trackingState/occupants/0/bodyKeyPoints/{kp2_idx}/quality'
+
+                    val1_x = row.get(c1_x, np.nan)
+                    val1_y = row.get(c1_y, np.nan)
+                    val2_x = row.get(c2_x, np.nan)
+                    val2_y = row.get(c2_y, np.nan)
+                    
+                    kp1_x = float(int(float(row.get(c1_x, np.nan)))) if not pd.isna(row.get(c1_x)) else np.nan
+                    kp1_y = float(int(float(row.get(c1_y, np.nan)))) if not pd.isna(row.get(c1_y)) else np.nan
+                    kp1_q = float(row.get(c1_q, 0.0))
+                    
+                    kp2_x = float(int(float(val2_x))) if not pd.isna(val2_x) else np.nan
+                    kp2_y = float(int(float(val2_y))) if not pd.isna(val2_y) else np.nan
+                    kp2_q = float(row.get(c2_q, 0.0))
+                    
+                    if not (np.isnan(kp1_x) or np.isnan(kp1_y) or np.isnan(kp2_x) or np.isnan(kp2_y)):
+                        if kp1_q >= 0.1 and kp2_q >= 0.1:
+                            p1x = int(round((kp1_x - x1_margin) * scale + left))
+                            p1y = int(round((kp1_y - y1) * scale + c_plus_plus_y_offset))
+                            p2x = int(round((kp2_x - x1_margin) * scale + left))
+                            p2y = int(round((kp2_y - y1) * scale + c_plus_plus_y_offset))
+                            
+                            if (0 <= p1x < img_width and 0 <= p1y < img_height and 
+                                0 <= p2x < img_width and 0 <= p2y < img_height):
+                                cv2.line(final_img, (p1x, p1y), (p2x, p2y), 255, 3)
+
+            if is_dlr:
+                img_tensor_np = final_img.astype(np.uint8)
+            else:
+                img_tensor_np = final_img.astype(np.float32) * 0.00392156862
+            
+            img_tensor_np = np.expand_dims(img_tensor_np, axis=0) 
+            img_tensor_np = np.expand_dims(img_tensor_np, axis=0) 
+            img_tensor = torch.from_numpy(img_tensor_np) 
+            
+            if is_dlr:
+                dlr_inputs = {input_names[0]: img_tensor_np}
+                dlr_outs = dlr_model.run(dlr_inputs)
+                pred_raw = np.squeeze(dlr_outs[0])
+                pos_probs = 1.0 / (1.0 + np.exp(-pred_raw)) 
+            elif is_onnx:
+                ort_inputs = {input_names[0]: img_tensor_np}
+                ort_outs = session.run([output_name], ort_inputs)
+                pred_raw = np.squeeze(ort_outs[0])
+                pos_probs = 1.0 / (1.0 + np.exp(-pred_raw)) 
+            else:
+                pred = model(img_tensor.to(device))
+                pos_probs = np.squeeze(torch.sigmoid(pred).cpu().numpy())
+
+            if pos_probs.ndim == 0:
+                pos_probs = np.array([pos_probs])
+
+            max_pos_prob = np.clip(np.max(pos_probs), 0.0, 1.0)
+            correctly_seated_prob = 1.0 - max_pos_prob
+            
+            full_probs = [correctly_seated_prob] + pos_probs.tolist()
+
+            frame_data = {"index": frame_idx}
+            
+            for class_name_from_model, prob in zip(class_names, full_probs):
+                clean_name = class_name_from_model.lower().replace("_", "").replace(" ", "")
+                final_name = "closetoairbag" if clean_name == "tooclosetoairbag" else clean_name
+                
+                # === LISSAGE TEMPOREL STRICT (C++ REPLICA) ===
+                if final_name in cpp_class_order:
+                    # On pousse la prédiction brute (comme floatBuffer.push())
+                    temporal_buffers[final_name].append(float(prob))
+                    # Division stricte par 20 pour imiter l'écrasement C++ sur les 19 premières frames
+                    smoothed_prob = sum(temporal_buffers[final_name]) / float(BUFFER_SIZE)
+                    # On exporte la moyenne, et non plus le score brut
+                    frame_data[final_name] = smoothed_prob
+
+            for cpp_col in cpp_class_order:
+                if cpp_col not in frame_data:
+                    frame_data[cpp_col] = -1.0
+
+            results.append(frame_data)
+            frame_idx += 1
+            pbar.update(1)
+
+    cap.release()
+    pbar.close()
+
+    df_results = pd.DataFrame(results)
+    final_columns = ["index"] + cpp_class_order
+    df_results = df_results[final_columns]
+    
+    df_results.to_csv(output_csv, index=False)
+    print(f"  -> Prédictions sauvegardées : {output_csv}")
+
+    return df_results
+
+
+def main(model_path, videos_dir, with_tatoo_keypoints, output_dir=None, config_path=None,
+         gt_csv_dir=None, kpi_csv_path=None, kpi_threshold=0.5):
+    """
+    Lance l'inférence d'un modèle de posture sur un lot de vidéos.
+
+    Args:
+        model_path (str): Chemin vers le modèle (.onnx, .pt, ou dossier DLR).
+        videos_dir (str): Dossier contenant les vidéos d'entrée (.mp4) et leurs CSV de tracking associés.
+        with_tatoo_keypoints (bool): Indique s'il faut tracer le squelette.
+        output_dir (str, optional): Dossier de sortie pour les CSV de prédictions individuels.
+        config_path (str, optional): Chemin vers le fichier config.yaml.
+        gt_csv_dir (str, optional): Dossier contenant les CSV de vérité terrain (nommés `<video_name>_eval_with_gt.csv`).
+                                     Si fourni, calcule les KPI par vidéo + GLOBAL.
+        kpi_csv_path (str, optional): Chemin du fichier récapitulatif des KPI (CSV). 
+                                       Par défaut : <output_dir>/KPI_summary_videos.csv
+        kpi_threshold (float): Seuil de binarisation pour les KPI.
+    """
+    if isinstance(with_tatoo_keypoints, str):
+        with_tatoo_keypoints = with_tatoo_keypoints.lower() in ['true', '1', 'yes']
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    
+    if output_dir is None:
+        output_dir = os.path.join(videos_dir, "predictions")
+    os.makedirs(output_dir, exist_ok=True)
+
+    if config_path is None:
+        inference_folder = os.path.dirname(model_path.rstrip('/')) if os.path.isdir(model_path) else os.path.dirname(model_path)
+        config_path = os.path.join(inference_folder, "../config.yaml")
+    assert os.path.isfile(config_path), f"Config file not found: {config_path}"
+
+    config = get_config()
+    config.set_config(config_path)
+    
+    class_names = ["correctly_seated"] + list(config.input.positive_labels)
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+    
+    # --- CHARGEMENT DU MODÈLE (UNE SEULE FOIS POUR TOUTES LES VIDÉOS) ---
+    is_dlr = os.path.isdir(model_path)
+    is_onnx = model_path.endswith(".onnx")
+    
+    model = session = dlr_model = None
+    input_names = output_name = None
+    
+    if is_dlr:
+        import dlr
+        print(f"⚙️ Chargement du modèle quantifié DLR : {model_path}")
+        dlr_model = dlr.DLRModel(model_path, 'cpu')
+        input_names = dlr_model.get_input_names()
+    elif is_onnx:
+        import onnxruntime as ort
+        print(f"⚙️ Chargement du modèle ONNX : {model_path}")
+        providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
+        session = ort.InferenceSession(model_path, providers=providers)
+        input_names = [inp.name for inp in session.get_inputs()]
+        output_name = session.get_outputs()[0].name
+    else:
+        print(f"⚙️ Chargement du modèle PyTorch : {model_path}")
+        checkpoint = torch.load(model_path, map_location=torch.device('cpu'), weights_only=False)
+        trained_state_dict = checkpoint["model_state_dict"] if "model_state_dict" in checkpoint else checkpoint
+        torch.nn.modules.utils.consume_prefix_in_state_dict_if_present(trained_state_dict, "module.")
+        model = load_model(config)
+        model.load_state_dict(trained_state_dict)
+        model.to(device)
+        model.eval()
+
+    # --- TRAITEMENT DU LOT DE VIDÉOS ---
+    video_files = glob.glob(os.path.join(videos_dir, "*.mp4"))
+    if not video_files:
+        print(f"❌ Aucune vidéo .mp4 trouvée dans : {videos_dir}")
+        return
+
+    print(f"🚀 Début du traitement : {len(video_files)} vidéo(s) trouvée(s).")
+    print(f"Mode Tatouage Visuel (Squelette) : {'ACTIVÉ' if with_tatoo_keypoints else 'DÉSACTIVÉ'}")
+
+    merged_dfs_dict = {}
+
+    for video_path in sorted(video_files):
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
+        output_csv = os.path.join(output_dir, f"{video_name}_predictions.csv")
+        
+        df_pred = run_video_inference(
+            model_path, video_path, with_tatoo_keypoints, output_csv, 
+            model, session, dlr_model, device, input_names, output_name, 
+            config, CPP_CLASS_ORDER, class_names
+        )
+
+        if df_pred is not None and gt_csv_dir is not None:
+            # Cherche le fichier GT correspondant (convention de nommage issue de l'autre script)
+            gt_path_1 = os.path.join(gt_csv_dir, f"{video_name}_eval_with_gt.csv")
+            gt_path_2 = os.path.join(gt_csv_dir, f"{video_name}.csv") # Fallback
+            
+            gt_csv_path = gt_path_1 if os.path.isfile(gt_path_1) else (gt_path_2 if os.path.isfile(gt_path_2) else None)
+            
+            if gt_csv_path:
+                df_gt_full = pd.read_csv(gt_csv_path)
+                gt_cols = [c for c in df_gt_full.columns if c == "index" or str(c).endswith("_gt")]
+                df_gt = df_gt_full[gt_cols]
+                
+                df_merged = pd.merge(df_pred, df_gt, on="index", how="inner")
+                merged_dfs_dict[video_name] = df_merged
+            else:
+                print(f"⚠️ Vérité terrain introuvable pour {video_name}. Ignoré pour le calcul des KPI.")
+
+    # --- CALCUL FINAL DES KPI ---
+    if gt_csv_dir is not None and merged_dfs_dict:
+        print(f"\n📊 Calcul des KPI globaux (seuil={kpi_threshold})...")
+        df_kpi = compute_kpis_from_merged_dict(merged_dfs_dict, threshold=kpi_threshold, cpp_class_order=CPP_CLASS_ORDER)
+        
+        # Réordonner avec le GLOBAL à la fin
+        is_global = df_kpi['Sequence'] == 'GLOBAL'
+        df_kpi_seq = df_kpi[~is_global].sort_values(['Sequence', 'Class'])
+        df_kpi_global = df_kpi[is_global].sort_values(['Class'])
+        df_kpi = pd.concat([df_kpi_seq, df_kpi_global]).reset_index(drop=True)
+
+        if kpi_csv_path is None:
+            kpi_csv_path = os.path.join(output_dir, "KPI_summary_videos.csv")
+            
+        df_kpi.to_csv(kpi_csv_path, index=False)
+        print(f"✅ Tous les KPI ont été exportés (CSV) : {kpi_csv_path}")
+    elif gt_csv_dir is not None:
+        print("\n❌ Impossible de calculer les KPI : aucune vérité terrain correspondante n'a été trouvée pour les vidéos.")
+
+
+if __name__ == "__main__":
+    Fire(main)

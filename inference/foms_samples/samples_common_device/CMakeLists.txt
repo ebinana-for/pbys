@@ -1,0 +1,1 @@
+add_target_application_ti(samples_common_device foms_common)

@@ -1,0 +1,1 @@
+add_library_target_ti(samples_utils foms_positions)

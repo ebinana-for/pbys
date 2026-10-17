@@ -1,0 +1,1 @@
+add_test_target_ti(foms_common unit)

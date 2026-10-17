@@ -1,0 +1,22 @@
+.vscode/
+__pycache__/
+eval_out/
+trained_models/
+cache/
+*.mp4
+*.html
+/notebooks/florian
+/local_data
+# Dossiers de données et résultats
+saved_evals/
+saved_models/
+__pycache__/
+.DS_Store
+
+# Fichiers lourds et environnements
+*.pth
+*.onnx
+*.mp4
+*.csv
+*.pt
+eval_cpp_assets/

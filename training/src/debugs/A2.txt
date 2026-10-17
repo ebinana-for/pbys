@@ -1,0 +1,59 @@
+/home/irystec/miniconda3/envs/probayes_training/lib/python3.10/site-packages/albumentations/__init__.py:28: UserWarning: A new version of Albumentations is available: '2.0.8' (you have '2.0.4'). Upgrade using: pip install -U albumentations. To disable automatic update checks, set the environment variable NO_ALBUMENTATIONS_UPDATE to 1.
+  check_for_updates()
+/home/irystec/.local/lib/python3.10/site-packages/timm/models/layers/__init__.py:49: FutureWarning: Importing from timm.models.layers is deprecated, please import via timm.layers
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.layers", FutureWarning)
+/home/irystec/.local/lib/python3.10/site-packages/timm/models/registry.py:4: FutureWarning: Importing from timm.models.registry is deprecated, please import via timm.models
+  warnings.warn(f"Importing from {__name__} is deprecated, please import via timm.models", FutureWarning)
+/home/irystec/miniconda3/envs/probayes_training/lib/python3.10/site-packages/torch/utils/data/dataloader.py:624: UserWarning: This DataLoader will create 64 worker processes in total. Our suggested max number of worker in current system is 32, which is smaller than what this DataLoader is going to create. Please be aware that excessive worker creation might get DataLoader running slow or even freeze, lower the worker number to avoid potential slowness/freeze if necessary.
+  warnings.warn(
+device=cuda n_gpu=2 dataparallel=True workers=64
+step 000 data=e970ecea loss=0.88462543 params=9ad28698
+step 001 data=240b36e4 loss=0.82794380 params=1eeee1cf
+step 002 data=b19e00ed loss=0.76388234 params=3387b33e
+step 003 data=783c218d loss=0.80390942 params=7aefc6cb
+step 004 data=972f0210 loss=0.79831362 params=b3d6232b
+step 005 data=26c75c4a loss=0.73640722 params=a3decd03
+step 006 data=5b0eb520 loss=0.73955959 params=673236d1
+step 007 data=733dd67a loss=0.76344931 params=d15e91ab
+step 008 data=7c8c05bd loss=0.75650543 params=259e9f46
+step 009 data=129a8c62 loss=0.74501187 params=31e4b845
+step 010 data=0fc193c9 loss=0.74690795 params=90882ae7
+step 011 data=2be6a5be loss=0.72350168 params=9d3373ec
+step 012 data=97cf78c2 loss=0.74630207 params=65b922da
+step 013 data=6f05e13f loss=0.75792593 params=c03c0e69
+step 014 data=c83cf31e loss=0.74496472 params=760f24cf
+step 015 data=11edd960 loss=0.73123807 params=7651337c
+step 016 data=bbd34b66 loss=0.73305339 params=c31d41b4
+step 017 data=a4e24166 loss=0.73845404 params=b6e43376
+step 018 data=29dfce14 loss=0.75245917 params=4adf3140
+step 019 data=e2c2b32c loss=0.75531703 params=f01095ac
+step 020 data=66e30018 loss=0.72816509 params=87f44e06
+step 021 data=8e68feb7 loss=0.76340216 params=c8f14e18
+step 022 data=afdeb7e1 loss=0.76334274 params=43da85e9
+step 023 data=65be1caf loss=0.74016321 params=b44d0adb
+step 024 data=9cc9981e loss=0.69995546 params=9c699510
+step 025 data=60c08ca8 loss=0.75409687 params=88b151c1
+step 026 data=2a97b348 loss=0.74780172 params=a6ac3553
+step 027 data=e71999e0 loss=0.67061132 params=1ca2c9f7
+step 028 data=efacc503 loss=0.73995191 params=b9097e11
+step 029 data=70a91c14 loss=0.69786870 params=e0610a14
+step 030 data=b341bfb2 loss=0.71004713 params=6345364b
+step 031 data=ebf13646 loss=0.73261088 params=a9b2958d
+step 032 data=9fdf57ad loss=0.71750623 params=7bfd9c4f
+step 033 data=d11ec19e loss=0.71036386 params=1d8d59d3
+step 034 data=a094ac06 loss=0.74835515 params=62a0bbc7
+step 035 data=27c04e79 loss=0.77884007 params=87478776
+step 036 data=b27b93ac loss=0.74396670 params=40dd2e16
+step 037 data=0df665f7 loss=0.73415405 params=a6af0637
+step 038 data=22d4c4eb loss=0.70339525 params=ccda3155
+step 039 data=3a7a8ef3 loss=0.72673362 params=7e80d804
+step 040 data=0668561f loss=0.77399641 params=b48fa9b3
+step 041 data=f9fb3b7a loss=0.79093969 params=a2104f7e
+step 042 data=ceb57e4c loss=0.72232300 params=8d767ac5
+step 043 data=5e9d1e20 loss=0.69959038 params=dcd7ebab
+step 044 data=b427922c loss=0.73658830 params=daa90061
+step 045 data=c125cf1e loss=0.72553593 params=771d4fc6
+step 046 data=0c3aa917 loss=0.71527010 params=e69c9bbb
+step 047 data=a5a6a622 loss=0.71061224 params=f6e4823d
+step 048 data=e16e92d9 loss=0.72350395 params=11905fa7
+step 049 data=ca7e9399 loss=0.72374827 params=f599bdae
