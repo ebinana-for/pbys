@@ -74,7 +74,7 @@ def set_seed(seed=42):
     torch.backends.cudnn.deterministic = True
     torch.backends.cudnn.benchmark = False
 
-    torch.backends.cudnn.enabled = False
+    # torch.backends.cudnn.enabled = False
     
     torch.use_deterministic_algorithms(True)  # <- GARANTIT LE MODE STRICT
 
@@ -327,9 +327,11 @@ def train(config):
         model.train()
         logging.info(f"Start epoch {epoch}/{config.train.num_epoch}")
         for dataset in train_loader.datasets.values():
-            dataset.set_epoch(epoch)
+            if hasattr(dataset, 'set_epoch'):
+                dataset.set_epoch(epoch)
         train_pbar = tqdm.tqdm(
-            train_loader, total=len(train_loader), colour="red", leave=None
+            train_loader, total=len(train_loader), colour="red", leave=None, 
+            desc=f"Epoch {epoch}/{config.train.num_epoch}"
         )
 
         for step, (image_tensors, gender_labels, age_labels, *_) in enumerate(train_pbar):
@@ -407,11 +409,21 @@ if __name__ == "__main__":
     # Get args
     parser = argparse.ArgumentParser("parser")
     parser.add_argument("--config_file", required=True, help="Path to input config")
+    parser.add_argument("--seed", type=int, default=None, help="Random seed override")
     args = parser.parse_args()
 
     # Get config
     config = get_config()
     config.set_config(args.config_file)
+    if args.seed is not None:
+        if hasattr(config, "general"):
+            if hasattr(config.general, "seed"):
+                config.general.set_param("seed", args.seed)
+            else:
+                config.general.add_param("seed", args.seed)
+        else:
+            config.add_param("seed", args.seed)
+
     date_str = ""
     if config.general.get("create_timestamp_folder", True):
         date_str = datetime.datetime.now().strftime("%Y-%m-%dT%Hh%Mm%Ss")

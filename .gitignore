@@ -43,3 +43,4 @@ bubu/
 *.ipynb
 .ipynb_checkpoints/
 *.csv
+probayes_share/
