@@ -1,0 +1,134 @@
+general:
+    train_dir: /mnt/data/OoP/data/source_code/training/saved_models/OoP
+    create_timestamp_folder: true
+train:
+    num_epoch: 100 # Number of iterations to train for
+    optimizer: AdamW # Use optimizer Adadelta|SGD|Adam|AdamW
+    lr: 0.0005 # learning rate, default=1.0 for Adadelta
+    weight_decay: 0.05
+    beta1: 0.9 # beta1 for adam. default=0.9
+    rho: 0.95 # Decay rate rho for Adadelta. default=0.95
+    eps: 1.0e-08 # eps for Adadelta. default=1e-8
+model:
+    name: mobilenet_v2 # valid models: mobilenet_v2, mobilenet_v2_tr or mobilenet_v2_mlp
+    input_channels: 1
+    pretrained_backbone: null
+    checkpoint: null #/mnt/data/OoP/data/source_code/training/saved_models/OoP/4th_training_scheduler_lower_lr_wd/ckpt/epoch_10.pth
+    width_multiplier: 0.5
+    heads_params:
+      head1:
+        out_dim: 8 # Must be consistent with positive_labels number
+        loss: BCE # For BCE: ohem, focal, or none
+        loss_strategy: none
+input:
+    input_height: 256
+    input_width: 192
+    batch_size: 32         # input batch size (Doublé pour saturer les 2 GPU)
+    num_workers: 8        # number of data loading workers. Use -1 to use all cores.
+    train:
+        dataset1: 
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/keypoints
+        dataset2: 
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/keypoints      
+        dataset3:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/train/keypoints
+        dataset4:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_pbys_02_04/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_pbys_02_04/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_pbys_02_04/keypoints
+        dataset5: 
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/train/keypoints
+        dataset6: 
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_26_06/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_26_06/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_26_06/train/keypoints  
+    test:
+        dataset1: 
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/test/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/test/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/test/keypoints
+        dataset2:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/test/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/test/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/test/keypoints
+    positive_labels:
+        - Too_close_to_airbag       # Labelled as "1"
+        - Legs_on_dashboard         # Labelled as "2"
+        - Torso_dissimetry          # Labelled as "3"
+        - Reaching_back             # Labelled as "4"
+        - Lateral_body_contact      # Labelled as "5"
+        - One_shoulder_in_contact   # Labelled as "6"
+        - Pelvis rotation           # Labelled as "7"
+        - Pelvis_drift              # Labelled as "8"
+    negative_labels:              # all negative postures are labelled as "0"
+        - Rounded_back
+        - Looking_left_right
+        - Looking_back
+        - Looking_straight
+        - Correctly_seated
+    discard_labels:
+        - Buttock forward
+    one_hot_label: true
+    minority_class_min_ratio: 0.5
+    draw_keypoints: false
+    data_augmentations:
+        train:
+            pipeline:
+                p: 1.0
+                box_ops:
+                    SmartEyeJitterBox:
+                        edge_noise: 0.3
+                        p: 1.0
+                albumentation_ops:
+                    ColorJitter:
+                        brightness: 0.4
+                        contrast: 0.4
+                        saturation: 0.7
+                        hue: 0.5
+                        p: 0.6  # <- MODIFICATION : Probabilité augmentée (de 0.3 à 0.6)
+                    CoarseDropout:  # <- NOUVEAU BLOC : Masquage spatial destructeur
+                        max_holes: 3
+                        max_height: 40
+                        max_width: 40
+                        min_holes: 1
+                        min_height: 10
+                        min_width: 10
+                        fill_value: 0
+                        p: 0.5
+                    LongestMaxSize:
+                        max_size_hw: (256,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 256
+                        min_width: 192
+                        p: 1.0
+                custom_ops:
+                    ImgKptsHorizontalFlip:
+                        p: 0.5
+                    ImgKptsNormalize:
+                        p: 1.0
+        test:
+            pipeline:
+                p: 1.0
+                box_ops:
+                albumentation_ops:
+                    LongestMaxSize:
+                        max_size_hw: (256,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 256
+                        min_width: 192
+                        p: 1.0
+                custom_ops:
+                    ImgKptsNormalize:
+                        p: 1.0
+eval:
+    nb_imgs_in_tensorboard: 9
