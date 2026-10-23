@@ -16,7 +16,9 @@ declare -a tests=(
     # "grayscale bbox forced"
     # "r_channel keypoints forced"
     "grayscale keypoints forced"      # Le test avec le problème d'inférence
-    "grayscale keypoints letterbox"   # 🎯 LE TEST ULTIME : Clone C++ parfait
+    "grayscale keypoints letterbox"   
+    "grayscale keypoints letterbox rolling"     # Géométrie parfaite mais lissage Python
+    "grayscale keypoints letterbox cumulative"      # 🎯 LE TEST ULTIME : Clone C++ parfait
 )
 
 echo "=========================================================="
@@ -24,12 +26,12 @@ echo "Démarrage de l'étude d'ablation sur le dataset Forvia"
 echo "=========================================================="
 
 for test in "${tests[@]}"; do
-    read -r color crop resize <<< "$test"
+    read -r color crop resize smoothing <<< "$test"
     
-    echo -e "\n---> 🚀 LANCEMENT DU TEST : Color = $color | Crop = $crop | Resize = $resize <---"
+    echo -e "\n---> 🚀 LANCEMENT DU TEST : Color=$color | Crop=$crop | Resize=$resize | Smooth=$smoothing <---"
     
-    EVAL_DIR="$BASE_OUTPUT_DIR/eval_${color}_${crop}_${resize}"
-    KPI_DIR="$BASE_OUTPUT_DIR/kpi_${color}_${crop}_${resize}"
+    EVAL_DIR="$BASE_OUTPUT_DIR/eval_${color}_${crop}_${resize}_${smoothing}"
+    KPI_DIR="$BASE_OUTPUT_DIR/kpi_${color}_${crop}_${resize}_${smoothing}"
     mkdir -p "$EVAL_DIR" "$KPI_DIR"
 
     echo "1/2 : Génération des prédictions Python ONNX..."
@@ -37,6 +39,7 @@ for test in "${tests[@]}"; do
         --color_mode "$color" \
         --crop_mode "$crop" \
         --resize_mode "$resize" \
+        --smoothing_mode "$smoothing" \
         --output_dir "$EVAL_DIR" \
         --input_dir "$INPUT_DIR"
         

@@ -115,7 +115,7 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
         
     return frame_img[ymin:ymax, xmin:xmax]
 
-def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode):
+def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode, smoothing_mode):
     
     onnx_model_path = config.model.checkpoint
     session = ort.InferenceSession(onnx_model_path, providers=['CPUExecutionProvider'])
@@ -220,12 +220,22 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
 
             df_file = pd.DataFrame(file_results, columns=["index", "age", "gender", "score_gender", "score_age", "GT_age", "GT_gender"])
             
-            # Application du rolling
+            # Application du lissage
             df_file.replace(-1, np.nan, inplace=True)
-            df_file["age_mean"] = df_file["age"].rolling(window=20, min_periods=1).median()
-            df_file["gender_mean"] = df_file["gender"].rolling(window=20, min_periods=1).apply(lambda x: x.mode()[0] if not x.mode().empty else np.nan)
-            df_file["score_age_mean"] = df_file["score_age"].rolling(window=20, min_periods=1).mean()
-            df_file["score_gender_mean"] = df_file["score_gender"].rolling(window=20, min_periods=1).mean()
+            
+            # --- ABLATION : MODE DE LISSAGE ---
+            if smoothing_mode == "rolling":
+                df_file["age_mean"] = df_file["age"].rolling(window=20, min_periods=1).median()
+                df_file["gender_mean"] = df_file["gender"].rolling(window=20, min_periods=1).apply(lambda x: x.mode()[0] if not x.mode().empty else np.nan)
+                df_file["score_age_mean"] = df_file["score_age"].rolling(window=20, min_periods=1).mean()
+                df_file["score_gender_mean"] = df_file["score_gender"].rolling(window=20, min_periods=1).mean()
+            
+            elif smoothing_mode == "cumulative":
+                df_file["age_mean"] = df_file["age"].expanding(min_periods=1).mean().apply(lambda x: np.round(x) if pd.notnull(x) else np.nan)
+                df_file["gender_mean"] = df_file["gender"].expanding(min_periods=1).mean().apply(lambda x: 1 if pd.notnull(x) and x > 0.5 else (0 if pd.notnull(x) else np.nan))
+                df_file["score_age_mean"] = df_file["score_age"].expanding(min_periods=1).mean()
+                df_file["score_gender_mean"] = df_file["score_gender"].expanding(min_periods=1).mean()
+                
             df_file.fillna(-1, inplace=True)
             
             final_columns = ["index", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_age_mean", "score_gender_mean", "GT_age", "GT_gender"]
@@ -235,10 +245,11 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Ablation Study: Age/Gender ONNX")
-    parser.add_argument("-c", "--config_file_path", required=True) # <-- Ligne restaurée
+    parser.add_argument("-c", "--config_file_path", required=True)
     parser.add_argument("--color_mode", choices=["r_channel", "grayscale"], default="r_channel")
     parser.add_argument("--crop_mode", choices=["bbox", "keypoints"], default="bbox")
     parser.add_argument("--resize_mode", choices=["forced", "letterbox"], default="forced")
+    parser.add_argument("--smoothing_mode", choices=["rolling", "cumulative"], default="rolling") # <-- NOUVEAU
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--input_dir", required=True, help="Dossier contenant les vidéos et csv d'entrée")
     args = parser.parse_args()
@@ -247,4 +258,5 @@ if __name__ == "__main__":
     config.set_config(args.config_file_path)
 
     os.makedirs(args.output_dir, exist_ok=True)
-    evaluate(args.input_dir, args.output_dir, config, args.color_mode, args.crop_mode, args.resize_mode)
+    # N'oublie pas d'ajouter args.smoothing_mode dans l'appel :
+    evaluate(args.input_dir, args.output_dir, config, args.color_mode, args.crop_mode, args.resize_mode, args.smoothing_mode)
