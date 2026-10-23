@@ -9,15 +9,13 @@ INPUT_DIR="/mnt/data/OoP/data_to_infer/forvia_30_01"
 CPP_INF_DIR="/mnt/data/OoP/data_to_infer/forvia_30_01/output_AgeGender"
 BASE_OUTPUT_DIR="/mnt/data/pbys/training/saved_evals/AgeGender/private/ablation_study_forvia"
 
-# Les 4 combinaisons de l'étude d'ablation
 # Les combinaisons de l'étude d'ablation finale
 declare -a tests=(
     # "r_channel bbox forced"
     # "grayscale bbox forced"
     # "r_channel keypoints forced"
-    "grayscale keypoints forced"      # Le test avec le problème d'inférence
-    "grayscale keypoints letterbox"   
-    "grayscale keypoints letterbox rolling"     # Géométrie parfaite mais lissage Python
+    # "grayscale keypoints forced"      
+    "grayscale keypoints letterbox rolling"     
     "grayscale keypoints letterbox cumulative"      # 🎯 LE TEST ULTIME : Clone C++ parfait
 )
 
@@ -43,7 +41,14 @@ for test in "${tests[@]}"; do
         --output_dir "$EVAL_DIR" \
         --input_dir "$INPUT_DIR"
         
-    echo "✅ Terminé pour [$color + $crop]. Dashboard sauvegardé dans : $KPI_DIR"
+    echo "2/2 : Calcul des KPI et de l'alignement..."
+    # Appel de ton script de comparaison (ajuste les noms d'arguments si besoin selon ton fichier comparison_eval_c.py)
+    python comparison_eval_c.py \
+        --eval_dir "$EVAL_DIR" \
+        --inf_dir "$CPP_INF_DIR" \
+        --output_dir "$KPI_DIR"
+        
+    echo "✅ Terminé. Dashboard sauvegardé dans : $KPI_DIR"
 done
 
 echo -e "\n🎉 Tous les tests sont terminés !"
