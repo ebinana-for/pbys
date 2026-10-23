@@ -1,0 +1,124 @@
+general:
+    train_dir: /mnt/data/pbys/training/saved_models/OoP/data_aug_smartEye/
+    create_timestamp_folder: true
+train:
+    num_epoch: 100
+    optimizer: Adam
+    lr: 0.001
+    beta1: 0.9
+    rho: 0.95
+    eps: 1.0e-08
+model:
+    name: mobilenet_v2
+    input_channels: 1
+    pretrained_backbone: null
+    checkpoint: null
+    width_multiplier: 0.5
+    heads_params:
+        head1:
+            out_dim: 8
+            loss: BCE
+            loss_strategy: none
+input:
+    input_height: 256
+    input_width: 192
+    batch_size: 32
+    num_workers: 32
+    train:
+        dataset1:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/keypoints
+        dataset2:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_23_05/train/keypoints
+        dataset3:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/train/keypoints
+        dataset4:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_pbys_02_04/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_pbys_02_04/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_pbys_02_04/keypoints
+        dataset5:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/train/keypoints
+        dataset6:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_26_06/train/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_26_06/train/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_26_06/train/keypoints
+    test:
+        dataset1:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/test/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/test/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_30_01/test/keypoints
+        dataset2:
+            img_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/test/images
+            annot_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/test/labels
+            kpts_path: /home/irystec/Desktop/private_datasets/recordings_forvia_31_01/test/keypoints
+    positive_labels:
+    - Too_close_to_airbag
+    - Legs_on_dashboard
+    - Torso_dissimetry
+    - Reaching_back
+    - Lateral_body_contact
+    - One_shoulder_in_contact
+    - Pelvis rotation
+    - Pelvis_drift
+    negative_labels:
+    - Rounded_back
+    - Looking_left_right
+    - Looking_back
+    - Looking_straight
+    - Correctly_seated
+    discard_labels:
+    - Buttock forward
+    one_hot_label: true
+    minority_class_min_ratio: 0.5
+    draw_keypoints: false
+    data_augmentations:
+        train:
+            pipeline:
+                p: 1.0
+                box_ops:
+                    SmartEyeJitterBox:
+                        edge_noise: 0.2
+                        p: 1.0
+                albumentation_ops:
+                    ColorJitter:
+                        brightness: 0.4
+                        contrast: 0.4
+                        saturation: 0.7
+                        hue: 0.5
+                        p: 0.3
+                    LongestMaxSize:
+                        max_size_hw: (256,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 256
+                        min_width: 192
+                        p: 1.0
+                custom_ops:
+                    ImgKptsHorizontalFlip:
+                        p: 0.5
+                    ImgKptsNormalize:
+                        p: 1.0
+        test:
+            pipeline:
+                p: 1.0
+                box_ops: null
+                albumentation_ops:
+                    LongestMaxSize:
+                        max_size_hw: (256,192)
+                        p: 1.0
+                    PadIfNeeded:
+                        min_height: 256
+                        min_width: 192
+                        p: 1.0
+                custom_ops:
+                    ImgKptsNormalize:
+                        p: 1.0
+eval:
+    nb_imgs_in_tensorboard: 9

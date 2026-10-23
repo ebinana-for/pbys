@@ -594,6 +594,13 @@ class PostureDataset(torch.utils.data.Dataset):
             ymin = max(0, int(keypt_row0["box/top"]))
             xmax = min(img.shape[1], int(keypt_row0["box/right"]))
             ymax = min(img.shape[0], int(keypt_row0["box/bottom"]))
+
+            #Add of the 10% margin
+
+            box_w = xmax - xmin
+            w_margin = int(box_w * 0.2 / 2.0)
+            xmin = int(np.clip(xmin - w_margin, 0, img.shape[1]))
+            xmax = int(np.clip(xmax + w_margin, 0, img.shape[1]))
             box = [xmin, ymin, xmax, ymax]
 
             keypt_row = {

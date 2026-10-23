@@ -1,5 +1,5 @@
 general:
-  test_dir: /mnt/data/OoP/data/source_code/training/saved_evals/AgenGender/private
+  test_dir: /mnt/data/pbys/training/saved_evals/AgeGender/private
   create_timestamp_folder: true
   non_public_video_path: /mnt/data/OoP/data_to_infer/forvia_30_01
 

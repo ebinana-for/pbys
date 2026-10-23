@@ -29,10 +29,11 @@ echo '============================================================'
 # --- AJOUT ICI POUR LA REPRODUCTIBILITÉ ABSOLUE ---
 export PYTHONHASHSEED=42
 export CUBLAS_WORKSPACE_CONFIG=":4096:8"
+export MPLBACKEND=Agg
 # --------------------------------------------------
 
 # Liste des valeurs de bruit (edge_noise) à tester pour simuler SmartEye
-noises=(0.1 0.2 0.3 0.4 0.5)
+noises=(0.2 0.3 0.4 0.5)
 
 for noise in "${noises[@]}"
 do
