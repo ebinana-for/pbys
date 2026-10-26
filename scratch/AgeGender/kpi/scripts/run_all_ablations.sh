@@ -5,17 +5,24 @@ cd ../src
 CONFIG_FILE="/mnt/data/pbys/training/config/AgeGender/test/test_config_age_gender_onnx_probayes.yaml"
 
 # Chemins pour le dataset rapide (FORVIA)
-INPUT_DIR="/mnt/data/OoP/data_to_infer/forvia_30_01"
-CPP_INF_DIR="/mnt/data/OoP/data_to_infer/forvia_30_01/output_AgeGender"
-BASE_OUTPUT_DIR="/mnt/data/pbys/training/saved_evals/AgeGender/private/ablation_study_forvia"
+# INPUT_DIR="/mnt/data/OoP/data_to_infer/forvia_30_01"
+# CPP_INF_DIR="/mnt/data/OoP/data_to_infer/forvia_30_01/output_AgeGender"
+# BASE_OUTPUT_DIR="/mnt/data/pbys/training/saved_evals/AgeGender/private/ablation_study_forvia"
+
+
+INPUT_DIR="/mnt/data/OoP/data/DATA_HEIGHTWEIGHT"
+CPP_INF_DIR="/mnt/data/OoP/data/DATA_HEIGHTWEIGHT/pred"
+BASE_OUTPUT_DIR="/mnt/data/pbys/training/saved_evals/AgeGender/private/ablation_study_forvia/ODMS2"
 
 # Les combinaisons de l'étude d'ablation finale
 declare -a tests=(
-    # "r_channel bbox forced"
-    # "grayscale bbox forced"
-    # "r_channel keypoints forced"
-    # "grayscale keypoints forced"      
-    "grayscale keypoints letterbox rolling"     
+    # On ajoute "rolling" pour respecter les 4 arguments, mais on les commente pour gagner du temps
+    # "r_channel bbox forced rolling"
+    # "grayscale bbox forced rolling"
+    # "r_channel keypoints forced rolling"
+    # "grayscale keypoints forced rolling"      
+    # "grayscale keypoints letterbox rolling"     
+    
     "grayscale keypoints letterbox cumulative"      # 🎯 LE TEST ULTIME : Clone C++ parfait
 )
 
@@ -24,6 +31,11 @@ echo "Démarrage de l'étude d'ablation sur le dataset Forvia"
 echo "=========================================================="
 
 for test in "${tests[@]}"; do
+    # Ignore les lignes vides ou commentées si jamais le tableau est mal lu
+    if [[ -z "$test" || "$test" == \#* ]]; then
+        continue
+    fi
+
     read -r color crop resize smoothing <<< "$test"
     
     echo -e "\n---> 🚀 LANCEMENT DU TEST : Color=$color | Crop=$crop | Resize=$resize | Smooth=$smoothing <---"
@@ -42,7 +54,6 @@ for test in "${tests[@]}"; do
         --input_dir "$INPUT_DIR"
         
     echo "2/2 : Calcul des KPI et de l'alignement..."
-    # Appel de ton script de comparaison (ajuste les noms d'arguments si besoin selon ton fichier comparison_eval_c.py)
     python comparison_eval_c.py \
         --eval_dir "$EVAL_DIR" \
         --inf_dir "$CPP_INF_DIR" \

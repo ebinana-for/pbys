@@ -17,8 +17,14 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "model_name",
     type=str,
-    help="Which model to compile: age_gender, positions, positions_without_keypts, or positions_golden_reference",
-    choices=["age_gender", "positions", "positions_without_keypts", "positions_golden_reference"],
+    help="Which model to compile: age_gender, positions, positions_data_aug, positions_without_keypts, or positions_golden_reference",
+    choices=[
+        "age_gender",
+        "positions",
+        "positions_data_aug",
+        "positions_without_keypts",
+        "positions_golden_reference",
+    ],
 )
 parser.add_argument(
     "--no-offload", dest="offload", action="store_false", help="do not offload to TIDL"
@@ -123,7 +129,7 @@ model_output_directory = model_output_directory + "/artifacts"
 def get_default_calibration_set_path(model_id):
     if model_id == "model_age_gender":
         folder = "../data/images/agegender-calibration"
-    elif model_id == "model_positions":
+    elif model_id in ("model_positions", "model_positions_data_aug"):
         folder = "../data/images/position_calibration_twoclass"
     elif model_id == "model_positions_without_keypts":
         folder = "../data/images/position_without_keypts_calibration"

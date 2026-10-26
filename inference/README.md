@@ -152,5 +152,3 @@ cd bin
 ./Release/samples_positions_with_csv_and_video_device ../data/videos/thibault_vincent_28_M_178_68.mp4 ../data/videos/thibault_vincent_28_M_178_68.csv
 ```
 
-
-

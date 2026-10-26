@@ -88,6 +88,29 @@ models_configs = {
         task_type="classification",
         extra_info=AttrDict(num_images=numImages, num_classes=8, input_size=256),
     ),
+    "model_positions_data_aug": create_model_config(
+        source=AttrDict(
+            model_url="",
+            infer_shape=False,
+        ),
+        preprocess=AttrDict(
+            resize=224,
+            crop=224,
+            data_layout="NCHW",
+            resize_with_pad=False,
+            reverse_channels=False,
+        ),
+        session=AttrDict(
+            session_name="tvmdlr",
+            model_path="/mnt/data/pbys/training/saved_models/OoP/data_aug_smartEye/noise0point3/ckpt/best_epoch_20_batch_1.onnx",
+            input_mean=[0],
+            input_scale=[0.003921],
+            use_keypoints=True,
+            input_optimization=True,
+        ),
+        task_type="classification",
+        extra_info=AttrDict(num_images=numImages, num_classes=8, input_size=256),
+    ),
     "model_positions_without_keypts": create_model_config(
         source=AttrDict(
             model_url="",

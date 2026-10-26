@@ -48,8 +48,8 @@ def get_body_keypoint(df, frame_cnt, occupant_id, keypoint_number):
 
 def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     """
-    Traduction exacte de foms::computeFaceCropFromkeyPoints (foms_utils.cpp).
-    Extrait l'image recadrée si les critères sont respectés, sinon renvoie None.
+    Traduction C++ exacte : foms::computeFaceCropFromkeyPoints (foms_utils.cpp).
+    Corrigé pour correspondre à la troncature float -> int stricte du C++.
     """
     # 1. Récupération des 5 Keypoints requis
     LkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 1) # LeftEyeKeypointIndex
@@ -62,7 +62,7 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     if not (LkeyPt["valid"] and RkeyPt["valid"] and shinkeyPt["valid"] and REarkeyPt["valid"] and LEarkeyPt["valid"]):
         return None
 
-    # 3. Mathématiques du crop C++
+    # 3. Mathématiques du crop
     interEyeDistance = math.sqrt((LkeyPt["x"] - RkeyPt["x"])**2 + (LkeyPt["y"] - RkeyPt["y"])**2)
     
     if interEyeDistance < 5.0: # minInterEyeDistance
@@ -86,31 +86,30 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     width = interEyeDistance * 3.2
     height = eye_to_chin_vert_distance * 2.2
     
-    xmin = int(round(center_x - width / 2.0 + 0.5))
-    ymin = int(round(center_y - 0.8 * height / 2.0 + 0.5))
-    xmax = int(round(center_x + width / 2.0 + 0.5))
-    ymax = int(round(center_y + height / 2.0 + 0.5))
+    # --- CORRECTION MAJEURE : TRONCATURE C++ ---
+    # Equivalent de static_cast<int>(val + 0.5) en C++
+    xmin = int((center_x - width / 2.0) + 0.5)
+    ymin = int((center_y - 0.8 * height / 2.0) + 0.5)
+    xmax = int((center_x + width / 2.0) + 0.5)
+    ymax = int((center_y + height / 2.0) + 0.5)
     
+    # --- CORRECTION FINALE : REJET STRICT AU LIEU DU CLAMPING ---
+    img_h, img_w = frame_img.shape[:2]
+    
+    # Si la boîte déborde de l'image, le C++ rejette la frame
+    if xmin < 0 or ymin < 0 or xmax > img_w or ymax > img_h:
+        return None
+        
     final_width = float(xmax - xmin)
     final_height = float(ymax - ymin)
     
-    if final_height == 0:
+    if final_height <= 0 or final_width <= 0:
         return None
         
     ratio = final_width / final_height
     
     # Validation finale des limites (minWidthFaceCrop = 130, minHeightFaceCrop = 190)
     if ratio < 0.6 or ratio > 2.0 or final_width < 130 or final_height < 190:
-        return None
-        
-    # Sécurisation des limites de l'image (isvalid dans C++ CropRegion)
-    img_h, img_w = frame_img.shape[:2]
-    xmin = max(0, xmin)
-    ymin = max(0, ymin)
-    xmax = min(img_w, xmax)
-    ymax = min(img_h, ymax)
-    
-    if xmax <= xmin or ymax <= ymin:
         return None
         
     return frame_img[ymin:ymax, xmin:xmax]
@@ -148,13 +147,20 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
                 ret, frame = cap.read()
                 if not ret: break
 
+                # --- CORRECTION : CONVERSION COULEUR AVANT LE CROP ---
+                if color_mode == "grayscale":
+                    frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                elif color_mode == "r_channel":
+                    if len(frame.shape) == 3:
+                        frame = frame[:, :, 2]
+
                 # --- ABLATION : MODE DE CROP ---
                 if crop_mode == "bbox":
                     head_crop0, _, _, _ = get_face_bbox(df, occupant_id=0, frame=frame, frame_cnt=count)
                 elif crop_mode == "keypoints":
                     head_crop0 = compute_face_crop_from_keypoints(df, frame, count)
 
-                if head_crop0 is not None:
+                if head_crop0 is not None and head_crop0.shape[0] > 0 and head_crop0.shape[1] > 0:
                     
                     # --- ABLATION : MODE DE REDIMENSIONNEMENT (GÉOMÉTRIE) ---
                     if resize_mode == "forced":
@@ -184,18 +190,8 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
                         else:
                             input_image = head_crop0.copy()
                                         
-                    # --- ABLATION : MODE DE COULEUR ---
-                    if color_mode == "grayscale":
-                        # Reproduction du comportement C++ (cv::cvtColor BGR2GRAY)
-                        input_image = cv2.cvtColor(input_image, cv2.COLOR_BGR2GRAY)
-                        input_image = np.expand_dims(input_image, axis=2) # (H, W, 1)
-                    
-                    elif color_mode == "r_channel":
-                        # Reproduction du comportement Python actuel (ExtractRChannel)
-                        if len(input_image.shape) == 3:
-                            input_image = input_image[:, :, 2]
-                        input_image = np.expand_dims(input_image, axis=2) # (H, W, 1)
-
+                    # Préparation du tenseur (l'image est déjà en 2D grâce à la conversion préalable)
+                    input_image = np.expand_dims(input_image, axis=2) # (H, W, 1)
                     input_image = input_image.transpose((2, 0, 1)) 
                     input_image = np.expand_dims(input_image, axis=0).astype(np.float32) / 255.0
                     
@@ -210,9 +206,9 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
                     score_gender = float(np.max(softmax(logits_gender)))
 
                     age_pred = logits_age[0] if logits_age.size == 1 else np.sum(softmax(logits_age) * np.arange(0, len(logits_age)))
-                    age = age_pred
                     
-                    file_results.append([count, int(age), gender, score_gender, 1.0, gt_age, gt_gender])
+                    # C++ utilise une troncature pure
+                    file_results.append([count, int(age_pred), gender, score_gender, 1.0, gt_age, gt_gender])
                 else:
                     file_results.append([count, -1, -1, -1, -1, gt_age, gt_gender])
 
@@ -221,6 +217,7 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
             df_file = pd.DataFrame(file_results, columns=["index", "age", "gender", "score_gender", "score_age", "GT_age", "GT_gender"])
             
             # Application du lissage
+            valid_mask = df_file["age"] != -1
             df_file.replace(-1, np.nan, inplace=True)
             
             # --- ABLATION : MODE DE LISSAGE ---
@@ -231,18 +228,22 @@ def evaluate(input_path, output_path, config, color_mode, crop_mode, resize_mode
                 df_file["score_gender_mean"] = df_file["score_gender"].rolling(window=20, min_periods=1).mean()
             
             elif smoothing_mode == "cumulative":
-                df_file["age_mean"] = df_file["age"].expanding(min_periods=1).mean().apply(lambda x: np.round(x) if pd.notnull(x) else np.nan)
+                # CORRECTION : Troncature stricte int() au lieu de np.round()
+                df_file["age_mean"] = df_file["age"].expanding(min_periods=1).mean().apply(lambda x: int(x) if pd.notnull(x) else np.nan)
                 df_file["gender_mean"] = df_file["gender"].expanding(min_periods=1).mean().apply(lambda x: 1 if pd.notnull(x) and x > 0.5 else (0 if pd.notnull(x) else np.nan))
                 df_file["score_age_mean"] = df_file["score_age"].expanding(min_periods=1).mean()
                 df_file["score_gender_mean"] = df_file["score_gender"].expanding(min_periods=1).mean()
                 
+            # CORRECTION : On masque les moyennes calculées sur les frames vides
+            df_file.loc[~valid_mask, ["age_mean", "gender_mean", "score_age_mean", "score_gender_mean"]] = np.nan
+            
             df_file.fillna(-1, inplace=True)
             
             final_columns = ["index", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_age_mean", "score_gender_mean", "GT_age", "GT_gender"]
             df_file[final_columns].to_csv(os.path.join(output_path, f"{f_root}_out_age.csv"), index=False)
 
             pbar_files.update(1)
-
+            
 if __name__ == "__main__":
     parser = argparse.ArgumentParser("Ablation Study: Age/Gender ONNX")
     parser.add_argument("-c", "--config_file_path", required=True)

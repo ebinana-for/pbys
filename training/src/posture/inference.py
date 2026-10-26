@@ -51,7 +51,7 @@ def main():
 
     args = parser.parse_args()
     age_gender_inference = InferenceEnginePosture(args.model_path)
-    img = cv2.imread("/workspace/ressources/nir1.png")
+    img = cv2.imread("/mnt/data/pbys/training/ressources/nir1.png")
     preds = age_gender_inference.predict([img] * args.batch_size)
     print(preds)
 
