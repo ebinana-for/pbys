@@ -20,13 +20,9 @@ base_model_dir="/mnt/data/pbys/training/saved_models/OoP/data_aug_smartEye"
 base_py_inf_dir="/mnt/data/pbys/scratch/OoP/python_inference/output/results/data_aug_bboxes/inference_mimic_c/forvia4test"
 base_eval_dir="/mnt/data/pbys/scratch/OoP/python_inference/output/results/data_aug_bboxes/eval/forvia4test"
 
-# Dossier de sortie pour les CSV de comparaison
 base_out_dir="/mnt/data/pbys/scratch/OoP/python_inference/output/results/data_aug_bboxes/comparison/forvia4test"
+base_c_inf_dir="/mnt/data/pbys/scratch/OoP/python_inference/output/results/data_aug_bboxes/inference/forvia4test"
 
-# Dossier pour l'inférence C++ (chemin fourni)
-c_inf_dir="/mnt/data/pbys/scratch/OoP/python_inference/output/results/golden_reference/sunan/inference_c/forvia4test"
-
-# Note personnelle : Assure-toi que ton environnement Conda est bien activé avant de lancer !
 
 for i in {1..5}; do
     echo ""
@@ -48,6 +44,12 @@ for i in {1..5}; do
         # Reconstitution des chemins exacts générés lors des deux étapes précédentes
         eval_csv_dir="${base_eval_dir}/augpoint${i}_${model_name}"
         py_inf_csv_dir="${base_py_inf_dir}/augpoint${i}_${model_name}"
+        c_inf_csv_dir="${base_c_inf_dir}/augpoint${i}_${model_name}"
+
+        if [ ! -d "$c_inf_csv_dir" ]; then
+            echo "  ⚠️ Dossier d'inférence C introuvable : $c_inf_csv_dir"
+            echo "  -> Les KPI Inf_C seront indiqués à -1."
+        fi
         
         # Fichier CSV de sortie spécifique à ce modèle
         mkdir -p "$base_out_dir"
@@ -58,7 +60,7 @@ for i in {1..5}; do
         python3 "$python_script" \
             --eval_csv_dir "$eval_csv_dir" \
             --py_inf_csv_dir "$py_inf_csv_dir" \
-            --c_inf_csv_dir "$c_inf_dir" \
+            --c_inf_csv_dir "$c_inf_csv_dir" \
             --output_csv "$output_csv"
             
     done

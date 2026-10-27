@@ -42,7 +42,7 @@ int main(int argc, char* argv[]) {
 
     ////Load the model////
 
-    const std::string model_path = "../model-artifacts/model_positions_data_aug/";
+    const std::string model_path = "../model-artifacts/model_positions_data_aug_0_point_5/";
     foms::PositionClassification object(model_path, cameraParams);
 
     if (!object.is_loaded()) {

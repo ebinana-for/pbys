@@ -8,8 +8,8 @@ import os
 
 def generer_csv_global(fichiers, nom_sortie="resultats_globaux.csv"):
     """
-    Génère un fichier CSV unique comparant Inf_Py et Eval
-    pour plusieurs fichiers, en ignorant Inf_C.
+    Génère un fichier CSV unique comparant Inf_C et Eval
+    pour plusieurs fichiers.
     """
     lignes = []
     
@@ -34,7 +34,7 @@ def generer_csv_global(fichiers, nom_sortie="resultats_globaux.csv"):
             continue
 
         df_eval = df[df['Source'] == 'Eval'].set_index('Class')
-        df_inf = df[df['Source'] == 'Inf_Py'].set_index('Class')
+        df_inf = df[df['Source'] == 'Inf_C'].set_index('Class')
 
         classes = df_eval.index.intersection(df_inf.index)
 

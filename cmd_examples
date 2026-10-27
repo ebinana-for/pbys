@@ -1,0 +1,31 @@
+src/py_inference_v2_same_result_C_kpi_golden_ref_multiple_video.py     --model_path /mnt/data/OoP/data/source_code/training/saved_models/OoP/ASeed/model/ckpt/epoch_40_batch_1.onnx     --videos_dir /mnt/data/OoP/data/source_code/python_inference/data/forvia4testset     --with_tatoo_keypoints False     --output_dir /mnt/data/OoP/data/source_code/python_inference/output/result_eval_own_model/inference_mimic_c/forvia4test/golden_ref_kpi/onnx     --config_path /mnt/data/OoP/data/source_code/python_inference/data/forvia4testset/eval_onnx_july_4_forvia_sequences.yaml     --gt_csv_dir /mnt/data/OoP/data/source_code/python_inference/output/result_eval_own_model/eval_inference/forvia4test/kpi_golden_ref/onnx
+
+
+comparison_3_inference_table_output_multiple_video_frame_align.py     --eval_csv_dir /mnt/data/OoP/data/source_code/python_inference/output/result_eval_own_model/eval_inference/forvia4test/kpi_golden_ref/onnx     --py_inf_csv_dir /mnt/data/OoP/data/source_code/python_inference/output/result_eval_own_model/inference_mimic_c/forvia4test/golden_ref_kpi/onnx     --c_inf_csv_dir /mnt/data/OoP/data/source_code/inference/data/forvia4testset     --output_csv comparison_3_inference_multiple_vid_frame_align.csv
+
+
+comparison_3_inference_table_output_multiple_video_frame_align.py     --eval_csv_dir ./gt    --py_inf_csv_dir ./output/forvia4test2/golden_ref_kpi/onnx  --c_inf_csv_dir  ./output/inference    --output_csv comparison_3_inference_multiple_vid_frame_align2.csv
+
+
+python3 src/evaluation_inference_20_08_kpi_golden_ref_multiple_vid.py   --model_path="--model_path=/mnt/data/OoP/data/trained_models/position/no_keypoints/july_2025/model_positions.onnx"   --config_path="/mnt/data/OoP/data/source_code/python_inference/data/forvia4test/eval_onnx_july_4_forvia_sequences.yaml"   --output_dir="./output/results/probayes/eval_inference/forvia4test/forvia4test/onnx"
+
+
+python3 src/py_inference_v2_same_result_C_kpi_golden_ref_multiple_video.py \
+    --model_path="/mnt/data/OoP/data/trained_models/position/no_keypoints/july_2025/model_positions.onnx" \
+    --videos_dir /mnt/data/OoP/data/source_code/python_inference/data/forvia4testset \
+    --with_tatoo_keypoints False \
+    --output_dir /mnt/data/OoP/data/source_code/python_inference/output/results/probayes/inference_mimic_c/forvia4test/onnx \
+    --config_path /mnt/data/OoP/data/source_code/python_inference/data/forvia4testset/eval_onnx_july_4_forvia_sequences.yaml \
+    --gt_csv_dir ./output/results/probayes/eval_inference/eval_inference/forvia4test/onnx
+    
+    
+python3 src/OoP/comparison_3_inference_table_output_multiple_video_frame_align.py     --eval_csv_dir ../python_inference/output/results/probayes/eval_inference/forvia4test/onnx   --py_inf_csv_dir ../python_inference/output/results/probayes/inference_mimic_c/forvia4test/onnx  --c_inf_csv_dir  ../python_inference/output/results/probayes/inference_c  --output_csv ./output/OoP/comparison_3_inference_multiple_vid_frame_align_probayes.csv
+
+python3 src/OoP/comparison_3_inference_table_output_multiple_video_frame_align.py     --eval_csv_dir ../python_inference/output/results/golden_reference/eval_inference/forvia4test/onnx  --py_inf_csv_dir ../python_inference/output/results/golden_reference/inference_mimic_c/forvia4test/golden_ref_kpi/onnx --c_inf_csv_dir  ../python_inference/output/results/golden_reference/inference_c/forvia4test  --output_csv ./output/OoP/comparison_3_inference_multiple_vid_frame_align_golden_reference_new.csv
+
+
+selon la comparaison la gt met des 0 au lieu de -1 sur les frames qui sont filtres lord de l'evalauation donc ca cest pas bon donc fix that 
+
+
+
+

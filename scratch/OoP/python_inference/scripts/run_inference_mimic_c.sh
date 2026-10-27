@@ -22,7 +22,6 @@ python_script="../src/py_inference_v2_same_result_C_kpi_golden_ref_multiple_vide
 base_model_dir="/mnt/data/pbys/training/saved_models/OoP/data_aug_smartEye"
 base_out_dir="/mnt/data/pbys/scratch/OoP/python_inference/output/results/data_aug_bboxes/inference_mimic_c/forvia4test"
 
-# Note personnelle : Assure-toi que ton environnement Conda est bien activé avant de lancer !
 
 for i in {1..5}; do
     echo ""

@@ -17,11 +17,16 @@ parser = argparse.ArgumentParser()
 parser.add_argument(
     "model_name",
     type=str,
-    help="Which model to compile: age_gender, positions, positions_data_aug, positions_without_keypts, or positions_golden_reference",
+    help="Which model to compile: age_gender, positions, positions_data_aug_0_point_3_e20, positions_data_aug_0_point_4, positions_data_aug_0_point_5, positions_data_aug_0_point_3_e34, positions_data_aug_0_point_2, positions_data_aug_0_point_1, positions_without_keypts, or positions_golden_reference",
     choices=[
         "age_gender",
         "positions",
-        "positions_data_aug",
+        "positions_data_aug_0_point_3_e20",
+        "positions_data_aug_0_point_4",
+        "positions_data_aug_0_point_5",
+        "positions_data_aug_0_point_3_e34",
+        "positions_data_aug_0_point_2",
+        "positions_data_aug_0_point_1",
         "positions_without_keypts",
         "positions_golden_reference",
     ],
@@ -129,7 +134,15 @@ model_output_directory = model_output_directory + "/artifacts"
 def get_default_calibration_set_path(model_id):
     if model_id == "model_age_gender":
         folder = "../data/images/agegender-calibration"
-    elif model_id in ("model_positions", "model_positions_data_aug"):
+    elif model_id in (
+        "model_positions",
+        "model_positions_data_aug_0_point_3_e20",
+        "model_positions_data_aug_0_point_4",
+        "model_positions_data_aug_0_point_5",
+        "model_positions_data_aug_0_point_3_e34",
+        "model_positions_data_aug_0_point_2",
+        "model_positions_data_aug_0_point_1",
+    ):
         folder = "../data/images/position_calibration_twoclass"
     elif model_id == "model_positions_without_keypts":
         folder = "../data/images/position_without_keypts_calibration"

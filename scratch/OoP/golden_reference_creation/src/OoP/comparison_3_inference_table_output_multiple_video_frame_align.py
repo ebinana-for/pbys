@@ -108,22 +108,48 @@ def _compute_kpis(df, class_order, threshold, source_name, sequence_name):
     return kpi_rows
 
 
+def _missing_source_kpis(class_order, sequence_name):
+    return [
+        {
+            "Sequence": sequence_name,
+            "Source": "Inf_C",
+            "Class": cls,
+            "TP": -1,
+            "TN": -1,
+            "FP": -1,
+            "FN": -1,
+            "Precision": -1,
+            "Recall": -1,
+            "F1_Score": -1,
+            "Total_Frames": -1,
+        }
+        for cls in class_order
+    ]
+
+
 def process_single_video(eval_csv, py_inf_csv, c_inf_csv, threshold, cpp_class_order, reconstruct_correctly_seated, sequence_name):
     """Traite les 3 CSV correspondants à une même séquence, aligne les frames, et renvoie les DataFrames traités."""
     df_eval = pd.read_csv(eval_csv, low_memory=False)
     df_py = pd.read_csv(py_inf_csv, low_memory=False)
     
     # Chargement intelligent du C++ (Gère l'absence d'en-tête)
-    df_c = pd.read_csv(c_inf_csv, low_memory=False)
-    if "index" not in df_c.columns:
-        df_c = pd.read_csv(c_inf_csv, header=None, low_memory=False)
-        ref_cols = ["index"] + cpp_class_order
-        # Si la colonne d'index manque carrément dans le fichier, on la recrée
-        if len(df_c.columns) == len(ref_cols) - 1:
-            df_c.columns = ref_cols[1:]
-            df_c.reset_index(names='index', inplace=True)
-        else:
-            df_c.columns = ref_cols[:len(df_c.columns)]
+    c_inf_missing = not os.path.isfile(c_inf_csv)
+    if c_inf_missing:
+        common_indices = sorted(set(df_eval["index"]) & set(df_py["index"]))
+        df_c = pd.DataFrame({"index": common_indices})
+        for cls in cpp_class_order:
+            df_c[cls] = -1.0
+    else:
+        df_c = pd.read_csv(c_inf_csv, low_memory=False)
+        if "index" not in df_c.columns:
+            df_c = pd.read_csv(c_inf_csv, header=None, low_memory=False)
+            ref_cols = ["index"] + cpp_class_order
+            # Si la colonne d'index manque carrément dans le fichier, on la recrée
+            if len(df_c.columns) == len(ref_cols) - 1:
+                df_c.columns = ref_cols[1:]
+                df_c.reset_index(names='index', inplace=True)
+            else:
+                df_c.columns = ref_cols[:len(df_c.columns)]
             
     eval_cols = cpp_class_order + [f"{c}_gt" for c in cpp_class_order]
     df_eval = _to_numeric(df_eval, eval_cols)
@@ -143,10 +169,11 @@ def process_single_video(eval_csv, py_inf_csv, c_inf_csv, threshold, cpp_class_o
         if cls in df_eval.columns and cls in df_py.columns and cls in df_c.columns:
             invalid_mask = (
                 df_eval[cls].isna() | 
-                (df_eval[cls] == -1.0) | 
-                (df_py[cls] == -1.0) | 
-                (df_c[cls] == -1.0)
+                (df_eval[cls] == -1.0) |
+                (df_py[cls] == -1.0)
             )
+            if not c_inf_missing:
+                invalid_mask |= df_c[cls] == -1.0
             
             df_eval.loc[invalid_mask, cls] = np.nan
             df_py.loc[invalid_mask, cls] = -1.0
@@ -209,6 +236,7 @@ def main(
     all_c_dfs = []
     all_kpi_rows = []
     final_class_order = None
+    all_c_inference_missing = True
 
     for eval_csv in sorted(eval_files):
         basename = os.path.basename(eval_csv)
@@ -218,9 +246,14 @@ def main(
         py_inf_csv = os.path.join(py_inf_csv_dir, f"{sequence_name}_predictions.csv")
         c_inf_csv = os.path.join(c_inf_csv_dir, f"{sequence_name}_out_positions.csv")
 
-        if not os.path.isfile(py_inf_csv) or not os.path.isfile(c_inf_csv):
-            print(f"⚠️ Séquence {sequence_name} ignorée : fichiers correspondants introuvables.")
+        if not os.path.isfile(py_inf_csv):
+            print(f"⚠️ Séquence {sequence_name} ignorée : fichier d'inférence Python introuvable.")
             continue
+        c_inf_missing = not os.path.isfile(c_inf_csv)
+        if c_inf_missing:
+            print(f"⚠️ Fichier d'inférence C introuvable pour {sequence_name} : KPI Inf_C à -1.")
+        else:
+            all_c_inference_missing = False
 
         print(f"🔄 Traitement de la séquence : {sequence_name}")
 
@@ -236,7 +269,10 @@ def main(
 
             all_kpi_rows.extend(_compute_kpis(df_eval, class_order, threshold, "Eval", sequence_name))
             all_kpi_rows.extend(_compute_kpis(df_py, class_order, threshold, "Inf_Py", sequence_name))
-            all_kpi_rows.extend(_compute_kpis(df_c, class_order, threshold, "Inf_C", sequence_name))
+            if c_inf_missing:
+                all_kpi_rows.extend(_missing_source_kpis(class_order, sequence_name))
+            else:
+                all_kpi_rows.extend(_compute_kpis(df_c, class_order, threshold, "Inf_C", sequence_name))
 
     # --- CALCUL GLOBAL (Concaténation) ---
     if all_eval_dfs and final_class_order:
@@ -248,7 +284,10 @@ def main(
 
         all_kpi_rows.extend(_compute_kpis(global_eval, final_class_order, threshold, "Eval", "GLOBAL"))
         all_kpi_rows.extend(_compute_kpis(global_py, final_class_order, threshold, "Inf_Py", "GLOBAL"))
-        all_kpi_rows.extend(_compute_kpis(global_c, final_class_order, threshold, "Inf_C", "GLOBAL"))
+        if all_c_inference_missing:
+            all_kpi_rows.extend(_missing_source_kpis(final_class_order, "GLOBAL"))
+        else:
+            all_kpi_rows.extend(_compute_kpis(global_c, final_class_order, threshold, "Inf_C", "GLOBAL"))
 
         df_final = pd.DataFrame(all_kpi_rows)
         

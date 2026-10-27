@@ -250,7 +250,7 @@ if __name__ == "__main__":
     parser.add_argument("--color_mode", choices=["r_channel", "grayscale"], default="r_channel")
     parser.add_argument("--crop_mode", choices=["bbox", "keypoints"], default="bbox")
     parser.add_argument("--resize_mode", choices=["forced", "letterbox"], default="forced")
-    parser.add_argument("--smoothing_mode", choices=["rolling", "cumulative"], default="rolling") # <-- NOUVEAU
+    parser.add_argument("--smoothing_mode", choices=["rolling", "cumulative"], default="rolling") 
     parser.add_argument("--output_dir", required=True)
     parser.add_argument("--input_dir", required=True, help="Dossier contenant les vidéos et csv d'entrée")
     args = parser.parse_args()

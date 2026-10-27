@@ -129,18 +129,18 @@ def analyze_kpi_and_alignment(eval_dir, inf_dir, output_dir):
     print("        📊 GLOBAL REPORT: KPI & ALIGNMENT (DROP)")
     print("="*60)
     
-    g_py_age_mae = global_stats['py_age_err'] / global_stats['py_valid'] if global_stats['py_valid'] > 0 else 0
-    g_py_gen_acc = (global_stats['py_gen_corr'] / global_stats['py_valid']) * 100 if global_stats['py_valid'] > 0 else 0
-    g_cpp_age_mae = global_stats['cpp_age_err'] / global_stats['cpp_valid'] if global_stats['cpp_valid'] > 0 else 0
-    g_cpp_gen_acc = (global_stats['cpp_gen_corr'] / global_stats['cpp_valid']) * 100 if global_stats['cpp_valid'] > 0 else 0
+    g_py_age_mae = df_detailed['PY_age_mae'].mean()
+    g_py_gen_acc = df_detailed['PY_gender_acc_%'].mean()
+    g_cpp_age_mae = df_detailed['CPP_age_mae'].mean()
+    g_cpp_gen_acc = df_detailed['CPP_gender_acc_%'].mean()
     
-    g_py_age_mean_mae = global_stats['py_age_mean_err'] / global_stats['py_mean_valid'] if global_stats['py_mean_valid'] > 0 else 0
-    g_py_gen_mean_acc = (global_stats['py_gen_mean_corr'] / global_stats['py_mean_valid']) * 100 if global_stats['py_mean_valid'] > 0 else 0
-    g_cpp_age_mean_mae = global_stats['cpp_age_mean_err'] / global_stats['cpp_mean_valid'] if global_stats['cpp_mean_valid'] > 0 else 0
-    g_cpp_gen_mean_acc = (global_stats['cpp_gen_mean_corr'] / global_stats['cpp_mean_valid']) * 100 if global_stats['cpp_mean_valid'] > 0 else 0
+    g_py_age_mean_mae = df_detailed['PY_age_mean_mae'].mean()
+    g_py_gen_mean_acc = df_detailed['PY_gender_mean_acc_%'].mean()
+    g_cpp_age_mean_mae = df_detailed['CPP_age_mean_mae'].mean()
+    g_cpp_gen_mean_acc = df_detailed['CPP_gender_mean_acc_%'].mean()
 
-    g_align_age = global_stats['align_age_err'] / global_stats['align_frames'] if global_stats['align_frames'] > 0 else 0
-    g_align_gen = (global_stats['align_gen_corr'] / global_stats['align_frames']) * 100 if global_stats['align_frames'] > 0 else 0
+    g_align_age = df_detailed['ALIGN_age_diff'].mean()
+    g_align_gen = df_detailed['ALIGN_gender_match_%'].mean()
 
     print("\n--- 🎯 1. KPI: PERFORMANCE (vs Ground Truth) ---")
     print(f"{'Metric':<25} | {'PYTHON (ONNX)':<15} | {'C++ (Inference)':<15}")
