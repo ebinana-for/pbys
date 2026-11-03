@@ -345,7 +345,31 @@ def main():
 
         print(f"✅ Folder exported: {out_dir}")
         # Affichage enrichi dans le terminal
-        print(df_sum[["Class", "Absolute_GT", "Tracked_GT", "Lost_Track", "TP", "FP", "FN", "Precision", "Model_Recall", "E2E_Recall", "F1_Score"]].rename(columns={"Absolute_GT_Frames": "Absolute_GT", "Tracked_GT_Frames": "Tracked_GT", "Lost_Track_Frames": "Lost_Track", "End_to_End_Recall": "E2E_Recall"}).to_string(index=False, na_rep="N/A"))
+        # --- CLEAN TERMINAL FORMATTING ---
+        # 1. Remove the MACRO row
+        df_display = df_sum[df_sum["Class"] != "MACRO (classes with positives)"].copy()
+        
+        # 2. Select and rename columns for a compact view
+        cols_to_show = ["Class", "Absolute_GT_Frames", "Tracked_GT_Frames", "Lost_Track_Frames", 
+                        "TP", "FP", "FN", "Precision", "Model_Recall", "End_to_End_Recall", "F1_Score"]
+        df_display = df_display[cols_to_show].rename(columns={
+            "Absolute_GT_Frames": "Abs_GT", 
+            "Tracked_GT_Frames": "Track_GT", 
+            "Lost_Track_Frames": "Lost_GT", 
+            "Model_Recall": "Recall",
+            "End_to_End_Recall": "E2E_Rec",
+            "F1_Score": "F1"
+        })
+
+        # 3. Convert metrics to percentages (e.g., 0.6824 -> "68%")
+        for col in ["Precision", "Recall", "E2E_Rec", "F1"]:
+            df_display[col] = df_display[col].apply(
+                lambda x: f"{int(round(x * 100))}%" if pd.notnull(x) and not pd.isna(x) else "-"
+            )
+            
+        # 4. Final print without text wrapping
+        with pd.option_context('display.width', 1000, 'display.max_columns', None):
+            print(df_display.to_string(index=False, na_rep="-"))
 
     print(f"\n🎉 Evaluation of all occupants and the vehicle ('best') is complete!")
 

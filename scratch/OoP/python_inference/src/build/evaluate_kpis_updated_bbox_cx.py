@@ -304,15 +304,15 @@ def main():
             merged_dfs_by_seat["passenger"][video_base_name] = df_merged_pa
 
         # 3. Vehicle Best (Strict Max Pooling - requires BOTH seats if they were ever tracked)
-        # We define vehicle pooling as the max of driver and passenger.
-        # If one seat is lost (-1.0), it uses the other. If both lost, it's -1.0.
-        # This matches the true physical state of the cabin alerting system.
         df_pooled = pd.DataFrame({"index": np.arange(total_frames)})
         for cls in CPP_CLASS_ORDER:
             # Replace -1.0 with NaN for max calculation
             s_dr = df_driver[cls].replace(-1.0, np.nan)
             s_pa = df_passenger[cls].replace(-1.0, np.nan)
-            df_pooled[cls] = np.fmax(s_dr, s_pa).fillna(-1.0)
+            
+            # ---> CORRECTION DU WARNING ICI <---
+            # Utilise pd.concat au lieu de np.fmax pour ignorer proprement les NaN
+            df_pooled[cls] = pd.concat([s_dr, s_pa], axis=1).max(axis=1).fillna(-1.0)
             
         if (df_pooled[CPP_CLASS_ORDER] != -1.0).any(axis=None):
             df_merged_best = pd.merge(df_pooled, df_gt_frames, on="index", how="inner")
@@ -368,7 +368,32 @@ def main():
 
         print(f"✅ Folder exported: {out_dir}")
         # Affichage enrichi dans le terminal
-        print(df_sum[["Class", "Absolute_GT_Frames", "Tracked_GT_Frames", "Lost_Track_Frames", "TP", "FP", "FN", "Precision", "Model_Recall", "End_to_End_Recall", "F1_Score"]].rename(columns={"Absolute_GT_Frames": "Absolute_GT", "Tracked_GT_Frames": "Tracked_GT", "Lost_Track_Frames": "Lost_Track", "End_to_End_Recall": "E2E_Recall"}).to_string(index=False, na_rep="N/A"))
+
+        # --- CLEAN TERMINAL FORMATTING ---
+        # 1. Remove the MACRO row
+        df_display = df_sum[df_sum["Class"] != "MACRO (classes with positives)"].copy()
+        
+        # 2. Select and rename columns for a compact view
+        cols_to_show = ["Class", "Absolute_GT_Frames", "Tracked_GT_Frames", "Lost_Track_Frames", 
+                        "TP", "FP", "FN", "Precision", "Model_Recall", "End_to_End_Recall", "F1_Score"]
+        df_display = df_display[cols_to_show].rename(columns={
+            "Absolute_GT_Frames": "Abs_GT", 
+            "Tracked_GT_Frames": "Track_GT", 
+            "Lost_Track_Frames": "Lost_GT", 
+            "Model_Recall": "Recall",
+            "End_to_End_Recall": "E2E_Rec",
+            "F1_Score": "F1"
+        })
+
+        # 3. Convert metrics to percentages (e.g., 0.6824 -> "68%")
+        for col in ["Precision", "Recall", "E2E_Rec", "F1"]:
+            df_display[col] = df_display[col].apply(
+                lambda x: f"{int(round(x * 100))}%" if pd.notnull(x) and not pd.isna(x) else "-"
+            )
+            
+        # 4. Final print without text wrapping
+        with pd.option_context('display.width', 1000, 'display.max_columns', None):
+            print(df_display.to_string(index=False, na_rep="-"))
 
     print(f"\n🎉 Evaluation is complete!")
 
