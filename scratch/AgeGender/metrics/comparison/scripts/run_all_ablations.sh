@@ -12,16 +12,16 @@ CONFIG_FILE="/mnt/data/pbys/training/config/AgeGender/test/test_config_age_gende
 
 INPUT_DIR="/mnt/data/OoP/data/DATA_HEIGHTWEIGHT"
 CPP_INF_DIR="/mnt/data/OoP/data/DATA_HEIGHTWEIGHT/pred"
-BASE_OUTPUT_DIR="/mnt/data/pbys/training/saved_evals/AgeGender/private/ablation_study_forvia/ODMS2"
+BASE_OUTPUT_DIR="/mnt/data/pbys/scratch/AgeGender/metrics/comparison/output/ablation_study_eval/ODMS2"
 
 # Les combinaisons de l'étude d'ablation finale
 declare -a tests=(
     "r_channel bbox forced rolling"
-    "grayscale bbox forced rolling"
-    "r_channel keypoints forced rolling"
-    "grayscale keypoints forced rolling"      
-    "grayscale keypoints letterbox rolling"         
-    "grayscale keypoints letterbox cumulative"  
+    # "grayscale bbox forced rolling"
+    # "r_channel keypoints forced rolling"
+    # "grayscale keypoints forced rolling"      
+    # "grayscale keypoints letterbox rolling"         
+    # "grayscale keypoints letterbox cumulative"  
 )
 
 echo "=========================================================="

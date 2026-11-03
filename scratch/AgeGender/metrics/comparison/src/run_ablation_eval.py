@@ -12,9 +12,15 @@ from tqdm import tqdm
 import onnxruntime as ort
 import math
 
+import sys
 
-from src.utils.viewer_utils import get_face_bbox
-from src.utils.config import get_config
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, "../../.."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+from utils.viewer_utils import get_face_bbox
+from utils.config import get_config
 
 def softmax(x):
     e_x = np.exp(x - np.max(x))
