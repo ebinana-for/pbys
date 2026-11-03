@@ -245,7 +245,7 @@ def extract_seat_dataframe(df_pred, seat_condition, total_frames):
 def main():
     parser = argparse.ArgumentParser(description="Calculates KPIs from predictions and GT.")
     parser.add_argument("--predictions_dir", type=str, default="S03/mp4/predictions", help="Folder containing prediction CSVs.")
-    parser.add_argument("--gt_csv", type=str, default="ground_truth_all_videos.csv", help="Generated ground truth CSV file.")
+    parser.add_argument("--gt_csv", type=str, default="ground_truth_all_separated.csv", help="Generated ground truth CSV file.")
     parser.add_argument("--threshold", type=float, default=0.5, help="Confidence threshold.")
     parser.add_argument("--full_detail", action="store_true", help="Keep ALL video x class rows in KPI_per_video.csv.")
     parser.add_argument("--split_x", type=float, default=960.0, help="X coordinate to split Driver (left) from Passenger (right).")
@@ -268,11 +268,12 @@ def main():
         video_base_name = filename.replace("_predictions.csv", "")
         video_mp4_name = f"{video_base_name}.mp4"
 
+        # 1. Vérification de la Ground Truth
         row_gt = df_gt_master[df_gt_master['Video ID'] == video_mp4_name]
         if row_gt.empty:
             continue
-        gt_dict = row_gt[[f"{c}_gt" for c in CPP_CLASS_ORDER]].iloc[0].to_dict()
 
+        # 2. C'EST ICI QU'ON CHARGE df_pred !
         try:
             df_pred = pd.read_csv(pred_path)
         except pd.errors.EmptyDataError:
@@ -281,44 +282,64 @@ def main():
         if "bbox_cx" not in df_pred.columns:
             print(f"⚠️ Warning: 'bbox_cx' not found in {filename}. Please update inference script.")
             continue
-
+            
         total_frames = int(df_pred["index"].max()) + 1 if not df_pred.empty else 0
         if total_frames == 0:
             continue
 
-        df_gt_frames = pd.DataFrame([gt_dict] * total_frames)
-        df_gt_frames['index'] = np.arange(total_frames)
+        # 3. Extract and format DRIVER GT
+        gt_dict_dr = row_gt[[f"driver_{c}_gt" for c in CPP_CLASS_ORDER]].iloc[0].to_dict()
+        gt_dict_dr = {k.replace('driver_', ''): v for k, v in gt_dict_dr.items()}
+        df_gt_frames_dr = pd.DataFrame([gt_dict_dr] * total_frames)
+        df_gt_frames_dr['index'] = np.arange(total_frames)
 
-        # 1. Driver (Left Seat)
+        # 4. Extract and format PASSENGER GT
+        gt_dict_pa = row_gt[[f"passenger_{c}_gt" for c in CPP_CLASS_ORDER]].iloc[0].to_dict()
+        gt_dict_pa = {k.replace('passenger_', ''): v for k, v in gt_dict_pa.items()}
+        df_gt_frames_pa = pd.DataFrame([gt_dict_pa] * total_frames)
+        df_gt_frames_pa['index'] = np.arange(total_frames)
+
+        # 5. Vehicle Best GT (Trigger if Driver OR Passenger is OoP)
+        gt_dict_best = {}
+        for c in CPP_CLASS_ORDER:
+            key = f"{c}_gt"
+            if gt_dict_dr[key] == 1 or gt_dict_pa[key] == 1:
+                gt_dict_best[key] = 1 # True positive if at least one occupant is OoP
+            elif gt_dict_dr[key] == -1 and gt_dict_pa[key] == -1:
+                gt_dict_best[key] = -1 # Invalid frame
+            else:
+                gt_dict_best[key] = 0 # Correctly seated
+        
+        df_gt_frames_best = pd.DataFrame([gt_dict_best] * total_frames)
+        df_gt_frames_best['index'] = np.arange(total_frames)
+
+        # --- SEAT EXTRACTION AND MERGING ---
+        
+        # 1. Driver (Left Seat) -> Uses Driver GT
         df_driver = extract_seat_dataframe(df_pred, lambda cx: cx < args.split_x, total_frames)
         if (df_driver[CPP_CLASS_ORDER] != -1.0).any(axis=None):
-            df_merged_dr = pd.merge(df_driver, df_gt_frames, on="index", how="inner")
+            df_merged_dr = pd.merge(df_driver, df_gt_frames_dr, on="index", how="inner")
             df_merged_dr["subject"] = video_base_name.split("_")[0]
             merged_dfs_by_seat["driver"][video_base_name] = df_merged_dr
 
-        # 2. Passenger (Right Seat)
+        # 2. Passenger (Right Seat) -> Uses Passenger GT
         df_passenger = extract_seat_dataframe(df_pred, lambda cx: cx >= args.split_x, total_frames)
         if (df_passenger[CPP_CLASS_ORDER] != -1.0).any(axis=None):
-            df_merged_pa = pd.merge(df_passenger, df_gt_frames, on="index", how="inner")
+            df_merged_pa = pd.merge(df_passenger, df_gt_frames_pa, on="index", how="inner")
             df_merged_pa["subject"] = video_base_name.split("_")[0]
             merged_dfs_by_seat["passenger"][video_base_name] = df_merged_pa
 
-        # 3. Vehicle Best (Strict Max Pooling - requires BOTH seats if they were ever tracked)
+        # 3. Vehicle Best (Strict Max Pooling) -> Uses Best GT
         df_pooled = pd.DataFrame({"index": np.arange(total_frames)})
         for cls in CPP_CLASS_ORDER:
-            # Replace -1.0 with NaN for max calculation
             s_dr = df_driver[cls].replace(-1.0, np.nan)
             s_pa = df_passenger[cls].replace(-1.0, np.nan)
-            
-            # ---> CORRECTION DU WARNING ICI <---
-            # Utilise pd.concat au lieu de np.fmax pour ignorer proprement les NaN
             df_pooled[cls] = pd.concat([s_dr, s_pa], axis=1).max(axis=1).fillna(-1.0)
             
         if (df_pooled[CPP_CLASS_ORDER] != -1.0).any(axis=None):
-            df_merged_best = pd.merge(df_pooled, df_gt_frames, on="index", how="inner")
+            df_merged_best = pd.merge(df_pooled, df_gt_frames_best, on="index", how="inner")
             df_merged_best["subject"] = video_base_name.split("_")[0]
             merged_dfs_by_seat["vehicle_best"][video_base_name] = df_merged_best
-
     # --- GENERATE AUTOMATIC RESULTS ---
     for seat_name, merged_dfs_dict in merged_dfs_by_seat.items():
         if not merged_dfs_dict:
