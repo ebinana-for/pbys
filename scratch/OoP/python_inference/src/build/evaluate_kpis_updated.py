@@ -8,8 +8,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from sklearn.metrics import confusion_matrix, average_precision_score
 
-# Pour tous mes codes, j'utilise des environnements Conda.
-# Never remove my personal comments from the code.
+pd.set_option('future.no_silent_downcasting', True)
 
 CPP_CLASS_ORDER = [
     "closetoairbag",
@@ -28,9 +27,13 @@ ALL_CLASSES = CPP_CLASS_ORDER + [CS]
 
 VIDEO_COLS = ["Sequence", "Subject", "Class", "Support", "TP", "TN", "FP", "FN",
               "Precision", "Recall", "F1_Score", "Mean_Prob", "Max_Prob", "Total_Frames"]
-SUMMARY_COLS = ["Class", "Support_Frames", "Support_Videos", "TP", "TN", "FP", "FN",
-                "Precision", "Recall", "F1_Score", "Specificity", "Accuracy",
-                "FP_per_1000", "AP", "Total_Frames"]
+
+# UPDATED: Integration of Absolute GT and End-to-End metrics
+SUMMARY_COLS = ["Class", "Absolute_GT_Frames", "Tracked_GT_Frames", "Lost_Track_Frames", 
+                "Support_Videos", "TP", "TN", "FP", "FN",
+                "Precision", "Model_Recall", "End_to_End_Recall", "F1_Score", 
+                "Specificity", "Accuracy", "FP_per_1000", "AP", "Total_Frames"]
+
 SUBJECT_COLS = ["Subject", "Class", "Support", "TP", "TN", "FP", "FN",
                 "Precision", "Recall", "F1_Score", "Total_Frames"]
 
@@ -76,9 +79,10 @@ def _counts_and_metrics(gt, y_pred):
 
 def _invalid_row(**ident):
     row = dict(ident)
-    for k in ["Support", "Support_Frames", "Support_Videos", "TP", "TN", "FP", "FN",
-              "Precision", "Recall", "F1_Score", "Specificity", "Accuracy",
-              "FP_per_1000", "AP", "Mean_Prob", "Max_Prob", "Total_Frames"]:
+    for k in ["Support", "Support_Frames", "Absolute_GT_Frames", "Tracked_GT_Frames", 
+              "Lost_Track_Frames", "Support_Videos", "TP", "TN", "FP", "FN",
+              "Precision", "Recall", "Model_Recall", "End_to_End_Recall", "F1_Score", 
+              "Specificity", "Accuracy", "FP_per_1000", "AP", "Mean_Prob", "Max_Prob", "Total_Frames"]:
         row[k] = -1
     return row
 
@@ -103,26 +107,56 @@ def _summary_rows(df_all, video_rows, threshold):
     df_vid = pd.DataFrame(video_rows)
     rows = []
     for cls in ALL_CLASSES:
+        
+        # 1. CALCUL DE LA VÉRITÉ TERRAIN ABSOLUE (Avant filtrage des pertes de tracking)
+        absolute_gt_frames = 0
+        if cls == CS:
+            cols = [c for c in CPP_CLASS_ORDER if f"{c}_gt" in df_all.columns and c in df_all.columns]
+            if cols:
+                gt_cols = [f"{c}_gt" for c in cols]
+                valid_gt_only = (df_all[gt_cols] != -1).all(axis=1) # On ignore juste les annotations invalides
+                absolute_gt_frames = (df_all.loc[valid_gt_only, gt_cols] == 0).all(axis=1).sum()
+        else:
+            col_gt = f"{cls}_gt"
+            if col_gt in df_all.columns:
+                valid_gt_only = df_all[col_gt] != -1
+                absolute_gt_frames = (df_all.loc[valid_gt_only, col_gt] == 1).sum()
+
+        # 2. RÉCUPÉRATION DES ARRAYS FILTRÉS
         arr = _get_arrays(df_all, cls, threshold)
         if arr is None:
             rows.append(_invalid_row(Class=cls))
             continue
+            
         gt, _, score, y_pred = arr
         m = _counts_and_metrics(gt, y_pred)
         sub = df_vid[(df_vid["Class"] == cls) & (df_vid["Support"] > 0)]
         ap = round(float(average_precision_score(gt, score)), 4) if 0 < gt.sum() < len(gt) else np.nan
+        
+        # 3. DÉDUCTIONS DES NOUVELLES MÉTRIQUES
+        tracked_gt_frames = m["Support"]
+        lost_track_frames = absolute_gt_frames - tracked_gt_frames
+        e2e_recall = _div(m["TP"], absolute_gt_frames)
+        
         rows.append({
-            "Class": cls, "Support_Frames": m["Support"], "Support_Videos": int(len(sub)),
+            "Class": cls, 
+            "Absolute_GT_Frames": absolute_gt_frames,
+            "Tracked_GT_Frames": tracked_gt_frames,
+            "Lost_Track_Frames": lost_track_frames,
+            "Support_Videos": int(len(sub)),
             "TP": m["TP"], "TN": m["TN"], "FP": m["FP"], "FN": m["FN"],
-            "Precision": m["Precision"], "Recall": m["Recall"], "F1_Score": m["F1_Score"],
+            "Precision": m["Precision"], 
+            "Model_Recall": m["Recall"],
+            "End_to_End_Recall": e2e_recall,
+            "F1_Score": m["F1_Score"],
             "Specificity": m["Specificity"], "Accuracy": m["Accuracy"],
             "FP_per_1000": m["FP_per_1000"], "AP": ap, "Total_Frames": m["Total_Frames"],
         })
 
     df_s = pd.DataFrame(rows)
-    pos = df_s[df_s["Support_Frames"] > 0]
+    pos = df_s[df_s["Tracked_GT_Frames"] > 0]
     macro = {"Class": "MACRO (classes with positives)"}
-    for k in ["Precision", "Recall", "F1_Score", "AP"]:
+    for k in ["Precision", "Model_Recall", "End_to_End_Recall", "F1_Score", "AP"]:
         macro[k] = round(float(pos[k].mean()), 4) if len(pos) and pos[k].notna().any() else np.nan
     rows.append(macro)
     return rows
@@ -143,7 +177,7 @@ def _subject_rows(df_all, threshold, classes_with_support):
 
 def _make_dashboard(df_sum, df_subj, df_vid, out_path, threshold):
     df_cls = df_sum[df_sum["Class"].isin(ALL_CLASSES)]
-    cls_pos = df_cls[df_cls["Support_Frames"] > 0]
+    cls_pos = df_cls[df_cls["Tracked_GT_Frames"] > 0]
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 12))
     fig.suptitle(f"Inference Evaluation (threshold = {threshold})", fontsize=16, fontweight="bold")
@@ -152,12 +186,14 @@ def _make_dashboard(df_sum, df_subj, df_vid, out_path, threshold):
     if len(cls_pos):
         x = np.arange(len(cls_pos))
         w = 0.26
-        for i, (k, c) in enumerate([("Precision", "#4C72B0"), ("Recall", "#55A868"), ("F1_Score", "#C44E52")]):
+        # Mise à jour des libellés avec Model_Recall
+        for i, (k, c) in enumerate([("Precision", "#4C72B0"), ("Model_Recall", "#55A868"), ("F1_Score", "#C44E52")]):
             ax.bar(x + (i - 1) * w, cls_pos[k].astype(float).fillna(0), w, label=k, color=c)
         if cls_pos["AP"].notna().any():
             ax.scatter(x, cls_pos["AP"].astype(float), marker="D", color="black", zorder=5, label="AP (indicative)")
         ax.set_xticks(x)
-        ax.set_xticklabels([f"{c}\n{int(f)} frames / {int(v)} videos" for c, f, v in zip(cls_pos["Class"], cls_pos["Support_Frames"], cls_pos["Support_Videos"])], fontsize=8)
+        # Affichage du Tracked_GT_Frames sur l'axe X
+        ax.set_xticklabels([f"{c}\n{int(f)} frames / {int(v)} videos" for c, f, v in zip(cls_pos["Class"], cls_pos["Tracked_GT_Frames"], cls_pos["Support_Videos"])], fontsize=8)
         ax.set_ylim(0, 1.2)
         ax.legend(fontsize=8, ncol=4, loc="upper center")
     ax.set_title("Performance per class (classes with positives in GT)")
@@ -288,10 +324,10 @@ def main():
             df_vid_out = df_vid_full[keep].reset_index(drop=True)
 
         df_sum = pd.DataFrame(summary_rows)[SUMMARY_COLS]
-        for c in ["Support_Frames", "Support_Videos", "TP", "TN", "FP", "FN", "Total_Frames"]:
+        for c in ["Absolute_GT_Frames", "Tracked_GT_Frames", "Lost_Track_Frames", "Support_Videos", "TP", "TN", "FP", "FN", "Total_Frames"]:
             df_sum[c] = df_sum[c].astype("Int64")
 
-        classes_with_support = df_sum[(df_sum["Support_Frames"] > 0) & (df_sum["Class"].isin(ALL_CLASSES))]["Class"].tolist()
+        classes_with_support = df_sum[(df_sum["Tracked_GT_Frames"] > 0) & (df_sum["Class"].isin(ALL_CLASSES))]["Class"].tolist()
         df_subj = pd.DataFrame(_subject_rows(global_df, args.threshold, classes_with_support), columns=SUBJECT_COLS)
 
         out_dir = os.path.join(args.predictions_dir, f"kpi_occupant_{occ_id}")
@@ -308,7 +344,8 @@ def main():
         _make_dashboard(df_sum, df_subj, df_vid_full, path_png, args.threshold)
 
         print(f"✅ Folder exported: {out_dir}")
-        print(df_sum[["Class", "Support_Frames", "TP", "FP", "FN", "Precision", "Recall", "F1_Score"]].to_string(index=False, na_rep="N/A"))
+        # Affichage enrichi dans le terminal
+        print(df_sum[["Class", "Absolute_GT", "Tracked_GT", "Lost_Track", "TP", "FP", "FN", "Precision", "Model_Recall", "E2E_Recall", "F1_Score"]].rename(columns={"Absolute_GT_Frames": "Absolute_GT", "Tracked_GT_Frames": "Tracked_GT", "Lost_Track_Frames": "Lost_Track", "End_to_End_Recall": "E2E_Recall"}).to_string(index=False, na_rep="N/A"))
 
     print(f"\n🎉 Evaluation of all occupants and the vehicle ('best') is complete!")
 
