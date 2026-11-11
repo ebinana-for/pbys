@@ -1,0 +1,239 @@
+"""
+C++ Equivalent Evaluation Script for Age & Gender ODMS2
+Strictly replicates samples_age_gender_evaluation.cpp logic.
+Separated directories for Videos and CSVs.
+"""
+
+import argparse
+import os
+import cv2
+import numpy as np
+import pandas as pd
+from tqdm import tqdm
+import onnxruntime as ort
+import math
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.abspath(os.path.join(current_dir, "../../.."))
+if root_dir not in sys.path:
+    sys.path.insert(0, root_dir)
+
+from utils.config import get_config
+
+def softmax(x):
+    e_x = np.exp(x - np.max(x))
+    return e_x / e_x.sum(axis=0)
+
+def get_body_keypoint(df, frame_cnt, occupant_id, keypoint_number):
+    """
+    Simulates foms::BodyKeyPoint(CsvReader, ...) constructor.
+    """
+    quality_col = f"/trackingState/occupants/{occupant_id}/bodyKeyPoints/{keypoint_number}/quality"
+    x_col = f"/trackingState/occupants/{occupant_id}/bodyKeyPoints/{keypoint_number}/value/0"
+    y_col = f"/trackingState/occupants/{occupant_id}/bodyKeyPoints/{keypoint_number}/value/1"
+    
+    if quality_col not in df.columns or x_col not in df.columns or y_col not in df.columns:
+        return {"valid": False}
+        
+    try:
+        quality = float(df.at[frame_cnt, quality_col])
+        valid = quality > 0.1  # minBodyPtQuality = 0.1F in C++
+        
+        if not valid:
+            return {"valid": False}
+            
+        x = int(df.at[frame_cnt, x_col])
+        y = int(df.at[frame_cnt, y_col])
+        return {"valid": True, "x": x, "y": y, "quality": quality}
+    except (ValueError, KeyError, TypeError):
+        return {"valid": False}
+
+def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
+    """
+    Exact Python translation of foms::computeFaceCropFromkeyPoints.
+    Includes strict float-to-int truncation and boundary rejections.
+    """
+    LkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 1)  # LeftEye
+    RkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 2)  # RightEye
+    LEarkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 3) # LeftEar
+    REarkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 4) # RightEar
+    shinkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 25) # Chin
+    
+    if not (LkeyPt["valid"] and RkeyPt["valid"] and shinkeyPt["valid"] and REarkeyPt["valid"] and LEarkeyPt["valid"]):
+        return None
+
+    interEyeDistance = math.sqrt((LkeyPt["x"] - RkeyPt["x"])**2 + (LkeyPt["y"] - RkeyPt["y"])**2)
+    
+    if interEyeDistance < 5.0:
+        return None
+        
+    if shinkeyPt["x"] < LkeyPt["x"] or shinkeyPt["x"] > RkeyPt["x"]:
+        return None
+        
+    if (LEarkeyPt["x"] > RkeyPt["x"] and REarkeyPt["x"] > RkeyPt["x"]) or \
+       (LEarkeyPt["x"] < LkeyPt["x"] and REarkeyPt["x"] < LkeyPt["x"]):
+        return None
+        
+    eye_to_chin_vert_distance = (shinkeyPt["y"] - (RkeyPt["y"] + LkeyPt["y"]) / 2.0)
+    
+    if eye_to_chin_vert_distance <= interEyeDistance * 1.5:
+        return None
+        
+    center_x = (REarkeyPt["x"] + LEarkeyPt["x"]) / 2.0
+    center_y = (LkeyPt["y"] + RkeyPt["y"]) / 2.0
+    
+    width = interEyeDistance * 3.2
+    height = eye_to_chin_vert_distance * 2.2
+    
+    # C++ static_cast<int>(val + 0.5) equivalent
+    xmin = int((center_x - width / 2.0) + 0.5)
+    ymin = int((center_y - 0.8 * height / 2.0) + 0.5)
+    xmax = int((center_x + width / 2.0) + 0.5)
+    ymax = int((center_y + height / 2.0) + 0.5)
+    
+    img_h, img_w = frame_img.shape[:2]
+    
+    # Strict C++ boundary rejection
+    if xmin < 0 or ymin < 0 or xmax > img_w or ymax > img_h:
+        return None
+        
+    final_width = float(xmax - xmin)
+    final_height = float(ymax - ymin)
+    
+    if final_height <= 0 or final_width <= 0:
+        return None
+        
+    ratio = final_width / final_height
+    
+    if ratio < 0.6 or ratio > 2.0 or final_width < 130 or final_height < 190:
+        return None
+        
+    return frame_img[ymin:ymax, xmin:xmax]
+
+def evaluate(video_dir, csv_dir, output_path, config):
+    
+    onnx_model_path = config.model.checkpoint
+    session = ort.InferenceSession(onnx_model_path, providers=['CPUExecutionProvider'])
+    input_name = session.get_inputs()[0].name
+
+    # Identify matching video and csv files across the two directories
+    mp4_files = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
+    csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
+    
+    video_roots = set(os.path.splitext(f)[0] for f in mp4_files)
+    csv_roots = set(os.path.splitext(f)[0] for f in csv_files)
+    
+    # Only process files that exist in both directories
+    files_to_process = sorted(list(video_roots.intersection(csv_roots)))
+
+    if not files_to_process:
+        print("[Error] No matching video/csv pairs found.")
+        return
+
+    with tqdm(total=len(files_to_process), desc="Testing C++ KPI Pipeline Match") as pbar_files:
+        for f_root in files_to_process:
+            
+            video_path = os.path.join(video_dir, f_root + ".mp4")
+            csv_path = os.path.join(csv_dir, f_root + ".csv")
+            
+            cap = cv2.VideoCapture(video_path)
+            df = pd.read_csv(csv_path, low_memory=False)
+
+            count = 0
+            file_results = []
+            
+            # Hardcoded C++ occupant ID
+            occupant_id = 0 
+
+            while cap.isOpened():
+                ret, frame = cap.read()
+                if not ret: break
+
+                # C++ Logic: cv::cvtColor(img, img_gray, cv::COLOR_BGR2GRAY)
+                frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+
+                # C++ Logic: computeFaceCropFromkeyPoints
+                head_crop0 = compute_face_crop_from_keypoints(df, frame_gray, count, occupant_id)
+
+                if head_crop0 is not None and head_crop0.shape[0] > 0 and head_crop0.shape[1] > 0:
+                    
+                    # C++ Logic: Direct resize (Forced)
+                    input_image = cv2.resize(head_crop0, (config.input.input_width, config.input.input_height)) 
+                                        
+                    # Tensor preparation
+                    input_image = np.expand_dims(input_image, axis=2) 
+                    input_image = input_image.transpose((2, 0, 1)) 
+                    input_image = np.expand_dims(input_image, axis=0).astype(np.float32) / 255.0
+                    
+                    outputs = session.run(None, {input_name: input_image})
+                    
+                    if len(outputs) == 1:
+                        logits_gender, logits_age = outputs[0][0][:2], outputs[0][0][2:]
+                    else:
+                        logits_gender, logits_age = outputs[0][0], outputs[1][0]
+
+                    gender = {"M": 0, "F": 1}[["M", "F"][int(np.argmax(logits_gender))]]
+                    score_gender = float(np.max(softmax(logits_gender)))
+                    age_pred = logits_age[0] if logits_age.size == 1 else np.sum(softmax(logits_age) * np.arange(0, len(logits_age)))
+                    
+                    # Store raw inference (C++ truncates age_pred to int)
+                    file_results.append([count, int(age_pred), gender, score_gender])
+                else:
+                    # Invalid crop fallback
+                    file_results.append([count, -1, -1, -1])
+
+                count += 1
+
+            df_file = pd.DataFrame(file_results, columns=["index", "age", "gender", "score_gender"])
+            
+            # --- C++ STRICT MATCH: Cumulative Mean + Boolean Trap ---
+            
+            # 1. Calculate cumulative means ONLY on valid frames
+            valid_mask = df_file["age"] != -1
+            df_valid = df_file[valid_mask].copy()
+            
+            if not df_valid.empty:
+                # C++: Mean age is strictly cast to int
+                df_valid["age_mean"] = df_valid["age"].expanding(min_periods=1).mean().astype(int)
+                # C++: Gender mean > 0.5 triggers Female (1), else Male (0)
+                df_valid["gender_mean"] = (df_valid["gender"].expanding(min_periods=1).mean() >= 0.5).astype(int)
+                df_valid["score_gender_mean"] = df_valid["score_gender"].expanding(min_periods=1).mean()
+                
+                # Merge means back into the main timeline
+                df_file = df_file.merge(df_valid[["index", "age_mean", "gender_mean", "score_gender_mean"]], on="index", how="left")
+            else:
+                # Edge case: No valid frames in entire video
+                df_file["age_mean"] = -1
+                df_file["gender_mean"] = -1
+                df_file["score_gender_mean"] = -1
+
+            # 2. THE C++ BOOLEAN TRAP: If current frame fails tracking, overwrite EVERYTHING with -1 for that row
+            df_file.loc[~valid_mask, ["age_mean", "gender_mean", "score_gender_mean"]] = -1
+            
+            # Clean up remaining NaNs just in case
+            df_file.fillna(-1, inplace=True)
+            
+            # Ensure C++ integer typing on final output
+            df_file["age_mean"] = df_file["age_mean"].astype(int)
+            df_file["gender_mean"] = df_file["gender_mean"].astype(int)
+
+            # Write to CSV in the exact C++ column order
+            final_columns = ["index", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_gender_mean"]
+            df_file[final_columns].to_csv(os.path.join(output_path, f"{f_root}_out_age.csv"), index=False)
+
+            pbar_files.update(1)
+            
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser("C++ Replicator: Age/Gender ONNX")
+    parser.add_argument("-c", "--config_file_path", required=True, help="Path to your internal YAML/JSON config file")
+    parser.add_argument("--output_dir", required=True, help="Directory where results will be saved")
+    parser.add_argument("--video_dir", required=True, help="Directory containing input .mp4 files")
+    parser.add_argument("--csv_dir", required=True, help="Directory containing input .csv tracking files")
+    args = parser.parse_args()
+
+    config = get_config()
+    config.set_config(args.config_file_path)
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    evaluate(args.video_dir, args.csv_dir, args.output_dir, config)
