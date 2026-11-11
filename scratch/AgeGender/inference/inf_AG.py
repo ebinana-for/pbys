@@ -1,7 +1,7 @@
 """
-C++ Equivalent Evaluation Script for Age & Gender ODMS2
-Strictly replicates samples_age_gender_evaluation.cpp logic.
-Separated directories for Videos and CSVs, with bbox_cx tracking.
+Multi-Occupant Evaluation Script for Age & Gender ODMS2
+Evaluates multiple IDs simultaneously using a 'long format' dataframe structure.
+(e.g., index, id, age, gender...)
 """
 
 import argparse
@@ -49,7 +49,7 @@ def get_body_keypoint(df, frame_cnt, occupant_id, keypoint_number):
     except (ValueError, KeyError, TypeError):
         return {"valid": False}
 
-def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
+def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id):
     """
     Exact Python translation of foms::computeFaceCropFromkeyPoints.
     Returns: (cropped_image, face_center_x) or (None, -1) if invalid.
@@ -80,14 +80,13 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     if eye_to_chin_vert_distance <= interEyeDistance * 1.5:
         return None, -1
         
-    # Face BBox Center X based on Ears (C++ Logic)
+    # Face BBox Center X based on Ears
     center_x = (REarkeyPt["x"] + LEarkeyPt["x"]) / 2.0
     center_y = (LkeyPt["y"] + RkeyPt["y"]) / 2.0
     
     width = interEyeDistance * 3.2
     height = eye_to_chin_vert_distance * 2.2
     
-    # C++ static_cast<int>(val + 0.5) equivalent
     xmin = int((center_x - width / 2.0) + 0.5)
     ymin = int((center_y - 0.8 * height / 2.0) + 0.5)
     xmax = int((center_x + width / 2.0) + 0.5)
@@ -95,7 +94,6 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     
     img_h, img_w = frame_img.shape[:2]
     
-    # Strict C++ boundary rejection
     if xmin < 0 or ymin < 0 or xmax > img_w or ymax > img_h:
         return None, -1
         
@@ -118,21 +116,19 @@ def evaluate(video_dir, csv_dir, output_path, config):
     session = ort.InferenceSession(onnx_model_path, providers=['CPUExecutionProvider'])
     input_name = session.get_inputs()[0].name
 
-    # Identify matching video and csv files across the two directories
     mp4_files = [f for f in os.listdir(video_dir) if f.endswith('.mp4')]
     csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
     
     video_roots = set(os.path.splitext(f)[0] for f in mp4_files)
     csv_roots = set(os.path.splitext(f)[0] for f in csv_files)
     
-    # Only process files that exist in both directories
     files_to_process = sorted(list(video_roots.intersection(csv_roots)))
 
     if not files_to_process:
         print("[Error] No matching video/csv pairs found.")
         return
 
-    with tqdm(total=len(files_to_process), desc="Testing C++ KPI Pipeline Match") as pbar_files:
+    with tqdm(total=len(files_to_process), desc="Testing Multi-Occupant Long Format") as pbar_files:
         for f_root in files_to_process:
             
             video_path = os.path.join(video_dir, f_root + ".mp4")
@@ -144,90 +140,87 @@ def evaluate(video_dir, csv_dir, output_path, config):
             count = 0
             file_results = []
             
-            # Hardcoded C++ occupant ID
-            occupant_id = 0 
+            # IDs to track per frame
+            occupant_ids_to_track = [0, 1]
 
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret: break
 
-                # C++ Logic: cv::cvtColor(img, img_gray, cv::COLOR_BGR2GRAY)
                 frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                
+                for occ_id in occupant_ids_to_track:
+                    head_crop, bbox_cx = compute_face_crop_from_keypoints(df, frame_gray, count, occ_id)
 
-                # C++ Logic: computeFaceCropFromkeyPoints (Now returning crop AND center_x)
-                head_crop0, bbox_cx = compute_face_crop_from_keypoints(df, frame_gray, count, occupant_id)
+                    if head_crop is not None and head_crop.shape[0] > 0 and head_crop.shape[1] > 0:
+                        
+                        input_image = cv2.resize(head_crop, (config.input.input_width, config.input.input_height)) 
+                        input_image = np.expand_dims(input_image, axis=2) 
+                        input_image = input_image.transpose((2, 0, 1)) 
+                        input_image = np.expand_dims(input_image, axis=0).astype(np.float32) / 255.0
+                        
+                        outputs = session.run(None, {input_name: input_image})
+                        
+                        if len(outputs) == 1:
+                            logits_gender, logits_age = outputs[0][0][:2], outputs[0][0][2:]
+                        else:
+                            logits_gender, logits_age = outputs[0][0], outputs[1][0]
 
-                if head_crop0 is not None and head_crop0.shape[0] > 0 and head_crop0.shape[1] > 0:
-                    
-                    # C++ Logic: Direct resize (Forced)
-                    input_image = cv2.resize(head_crop0, (config.input.input_width, config.input.input_height)) 
-                                        
-                    # Tensor preparation
-                    input_image = np.expand_dims(input_image, axis=2) 
-                    input_image = input_image.transpose((2, 0, 1)) 
-                    input_image = np.expand_dims(input_image, axis=0).astype(np.float32) / 255.0
-                    
-                    outputs = session.run(None, {input_name: input_image})
-                    
-                    if len(outputs) == 1:
-                        logits_gender, logits_age = outputs[0][0][:2], outputs[0][0][2:]
+                        gender = {"M": 0, "F": 1}[["M", "F"][int(np.argmax(logits_gender))]]
+                        score_gender = float(np.max(softmax(logits_gender)))
+                        age_pred = logits_age[0] if logits_age.size == 1 else np.sum(softmax(logits_age) * np.arange(0, len(logits_age)))
+                        
+                        file_results.append([count, occ_id, int(age_pred), gender, score_gender, bbox_cx])
                     else:
-                        logits_gender, logits_age = outputs[0][0], outputs[1][0]
-
-                    gender = {"M": 0, "F": 1}[["M", "F"][int(np.argmax(logits_gender))]]
-                    score_gender = float(np.max(softmax(logits_gender)))
-                    age_pred = logits_age[0] if logits_age.size == 1 else np.sum(softmax(logits_age) * np.arange(0, len(logits_age)))
-                    
-                    # Store raw inference and bbox_cx
-                    file_results.append([count, int(age_pred), gender, score_gender, bbox_cx])
-                else:
-                    # Invalid crop fallback
-                    file_results.append([count, -1, -1, -1, -1])
+                        file_results.append([count, occ_id, -1, -1, -1, -1])
 
                 count += 1
 
-            df_file = pd.DataFrame(file_results, columns=["index", "age", "gender", "score_gender", "bbox_cx"])
+            # Convert to DataFrame
+            df_file = pd.DataFrame(file_results, columns=["index", "id", "age", "gender", "score_gender", "bbox_cx"])
             
-            # --- C++ STRICT MATCH: Cumulative Mean + Boolean Trap ---
+            # --- Apply C++ Logic independently for each Occupant ID ---
+            processed_dfs = []
             
-            # 1. Calculate cumulative means ONLY on valid frames
-            valid_mask = df_file["age"] != -1
-            df_valid = df_file[valid_mask].copy()
-            
-            if not df_valid.empty:
-                # C++: Mean age is strictly cast to int
-                df_valid["age_mean"] = df_valid["age"].expanding(min_periods=1).mean().astype(int)
-                # C++: Gender mean > 0.5 triggers Female (1), else Male (0)
-                df_valid["gender_mean"] = (df_valid["gender"].expanding(min_periods=1).mean() >= 0.5).astype(int)
-                df_valid["score_gender_mean"] = df_valid["score_gender"].expanding(min_periods=1).mean()
+            for occ_id in occupant_ids_to_track:
+                # Isolate the timeline for a single ID
+                df_id = df_file[df_file["id"] == occ_id].copy()
                 
-                # Merge means back into the main timeline
-                df_file = df_file.merge(df_valid[["index", "age_mean", "gender_mean", "score_gender_mean"]], on="index", how="left")
-            else:
-                # Edge case: No valid frames in entire video
-                df_file["age_mean"] = -1
-                df_file["gender_mean"] = -1
-                df_file["score_gender_mean"] = -1
+                valid_mask = df_id["age"] != -1
+                df_valid = df_id[valid_mask].copy()
+                
+                if not df_valid.empty:
+                    df_valid["age_mean"] = df_valid["age"].expanding(min_periods=1).mean().astype(int)
+                    df_valid["gender_mean"] = (df_valid["gender"].expanding(min_periods=1).mean() >= 0.5).astype(int)
+                    df_valid["score_gender_mean"] = df_valid["score_gender"].expanding(min_periods=1).mean()
+                    
+                    df_id = df_id.merge(df_valid[["index", "age_mean", "gender_mean", "score_gender_mean"]], on="index", how="left")
+                else:
+                    df_id["age_mean"] = -1
+                    df_id["gender_mean"] = -1
+                    df_id["score_gender_mean"] = -1
 
-            # 2. THE C++ BOOLEAN TRAP: If current frame fails tracking, overwrite EVERYTHING with -1 for that row
-            # Including bbox_cx since the frame is geometrically invalid
-            df_file.loc[~valid_mask, ["age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]] = -1
+                # C++ Boolean Trap
+                df_id.loc[~valid_mask, ["age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]] = -1
+                df_id.fillna(-1, inplace=True)
+                
+                # Enforce C++ Integer types
+                df_id["age_mean"] = df_id["age_mean"].astype(int)
+                df_id["gender_mean"] = df_id["gender_mean"].astype(int)
+                
+                processed_dfs.append(df_id)
+                
+            # Recombine and sort by frame index, then by occupant ID
+            df_final = pd.concat(processed_dfs).sort_values(by=["index", "id"]).reset_index(drop=True)
             
-            # Clean up remaining NaNs just in case
-            df_file.fillna(-1, inplace=True)
-            
-            # Ensure C++ integer typing on final output
-            df_file["age_mean"] = df_file["age_mean"].astype(int)
-            df_file["gender_mean"] = df_file["gender_mean"].astype(int)
-
-            # Write to CSV in the exact C++ column order + bbox_cx at the end
-            final_columns = ["index", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]
-            df_file[final_columns].to_csv(os.path.join(output_path, f"{f_root}_out_age.csv"), index=False)
+            # Order the columns exactly as the C++ logic
+            final_columns = ["index", "id", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]
+            df_final[final_columns].to_csv(os.path.join(output_path, f"{f_root}_out_age.csv"), index=False)
 
             pbar_files.update(1)
             
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser("C++ Replicator: Age/Gender ONNX")
+    parser = argparse.ArgumentParser("C++ Replicator (Long Format): Age/Gender ONNX")
     parser.add_argument("-c", "--config_file_path", required=True, help="Path to your internal YAML/JSON config file")
     parser.add_argument("--output_dir", required=True, help="Directory where results will be saved")
     parser.add_argument("--video_dir", required=True, help="Directory containing input .mp4 files")
