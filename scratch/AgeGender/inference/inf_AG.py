@@ -1,7 +1,7 @@
 """
 C++ Equivalent Evaluation Script for Age & Gender ODMS2
 Strictly replicates samples_age_gender_evaluation.cpp logic.
-Separated directories for Videos and CSVs.
+Separated directories for Videos and CSVs, with bbox_cx tracking.
 """
 
 import argparse
@@ -52,7 +52,7 @@ def get_body_keypoint(df, frame_cnt, occupant_id, keypoint_number):
 def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     """
     Exact Python translation of foms::computeFaceCropFromkeyPoints.
-    Includes strict float-to-int truncation and boundary rejections.
+    Returns: (cropped_image, face_center_x) or (None, -1) if invalid.
     """
     LkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 1)  # LeftEye
     RkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 2)  # RightEye
@@ -61,25 +61,26 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     shinkeyPt = get_body_keypoint(df, frame_cnt, occupant_id, 25) # Chin
     
     if not (LkeyPt["valid"] and RkeyPt["valid"] and shinkeyPt["valid"] and REarkeyPt["valid"] and LEarkeyPt["valid"]):
-        return None
+        return None, -1
 
     interEyeDistance = math.sqrt((LkeyPt["x"] - RkeyPt["x"])**2 + (LkeyPt["y"] - RkeyPt["y"])**2)
     
     if interEyeDistance < 5.0:
-        return None
+        return None, -1
         
     if shinkeyPt["x"] < LkeyPt["x"] or shinkeyPt["x"] > RkeyPt["x"]:
-        return None
+        return None, -1
         
     if (LEarkeyPt["x"] > RkeyPt["x"] and REarkeyPt["x"] > RkeyPt["x"]) or \
        (LEarkeyPt["x"] < LkeyPt["x"] and REarkeyPt["x"] < LkeyPt["x"]):
-        return None
+        return None, -1
         
     eye_to_chin_vert_distance = (shinkeyPt["y"] - (RkeyPt["y"] + LkeyPt["y"]) / 2.0)
     
     if eye_to_chin_vert_distance <= interEyeDistance * 1.5:
-        return None
+        return None, -1
         
+    # Face BBox Center X based on Ears (C++ Logic)
     center_x = (REarkeyPt["x"] + LEarkeyPt["x"]) / 2.0
     center_y = (LkeyPt["y"] + RkeyPt["y"]) / 2.0
     
@@ -96,20 +97,20 @@ def compute_face_crop_from_keypoints(df, frame_img, frame_cnt, occupant_id=0):
     
     # Strict C++ boundary rejection
     if xmin < 0 or ymin < 0 or xmax > img_w or ymax > img_h:
-        return None
+        return None, -1
         
     final_width = float(xmax - xmin)
     final_height = float(ymax - ymin)
     
     if final_height <= 0 or final_width <= 0:
-        return None
+        return None, -1
         
     ratio = final_width / final_height
     
     if ratio < 0.6 or ratio > 2.0 or final_width < 130 or final_height < 190:
-        return None
+        return None, -1
         
-    return frame_img[ymin:ymax, xmin:xmax]
+    return frame_img[ymin:ymax, xmin:xmax], center_x
 
 def evaluate(video_dir, csv_dir, output_path, config):
     
@@ -153,8 +154,8 @@ def evaluate(video_dir, csv_dir, output_path, config):
                 # C++ Logic: cv::cvtColor(img, img_gray, cv::COLOR_BGR2GRAY)
                 frame_gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-                # C++ Logic: computeFaceCropFromkeyPoints
-                head_crop0 = compute_face_crop_from_keypoints(df, frame_gray, count, occupant_id)
+                # C++ Logic: computeFaceCropFromkeyPoints (Now returning crop AND center_x)
+                head_crop0, bbox_cx = compute_face_crop_from_keypoints(df, frame_gray, count, occupant_id)
 
                 if head_crop0 is not None and head_crop0.shape[0] > 0 and head_crop0.shape[1] > 0:
                     
@@ -177,15 +178,15 @@ def evaluate(video_dir, csv_dir, output_path, config):
                     score_gender = float(np.max(softmax(logits_gender)))
                     age_pred = logits_age[0] if logits_age.size == 1 else np.sum(softmax(logits_age) * np.arange(0, len(logits_age)))
                     
-                    # Store raw inference (C++ truncates age_pred to int)
-                    file_results.append([count, int(age_pred), gender, score_gender])
+                    # Store raw inference and bbox_cx
+                    file_results.append([count, int(age_pred), gender, score_gender, bbox_cx])
                 else:
                     # Invalid crop fallback
-                    file_results.append([count, -1, -1, -1])
+                    file_results.append([count, -1, -1, -1, -1])
 
                 count += 1
 
-            df_file = pd.DataFrame(file_results, columns=["index", "age", "gender", "score_gender"])
+            df_file = pd.DataFrame(file_results, columns=["index", "age", "gender", "score_gender", "bbox_cx"])
             
             # --- C++ STRICT MATCH: Cumulative Mean + Boolean Trap ---
             
@@ -209,7 +210,8 @@ def evaluate(video_dir, csv_dir, output_path, config):
                 df_file["score_gender_mean"] = -1
 
             # 2. THE C++ BOOLEAN TRAP: If current frame fails tracking, overwrite EVERYTHING with -1 for that row
-            df_file.loc[~valid_mask, ["age_mean", "gender_mean", "score_gender_mean"]] = -1
+            # Including bbox_cx since the frame is geometrically invalid
+            df_file.loc[~valid_mask, ["age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]] = -1
             
             # Clean up remaining NaNs just in case
             df_file.fillna(-1, inplace=True)
@@ -218,8 +220,8 @@ def evaluate(video_dir, csv_dir, output_path, config):
             df_file["age_mean"] = df_file["age_mean"].astype(int)
             df_file["gender_mean"] = df_file["gender_mean"].astype(int)
 
-            # Write to CSV in the exact C++ column order
-            final_columns = ["index", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_gender_mean"]
+            # Write to CSV in the exact C++ column order + bbox_cx at the end
+            final_columns = ["index", "age", "gender", "score_gender", "age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]
             df_file[final_columns].to_csv(os.path.join(output_path, f"{f_root}_out_age.csv"), index=False)
 
             pbar_files.update(1)
