@@ -374,7 +374,7 @@ def main(model_path, videos_dir, output_dir=None, config_path=None,
     
     # Deduce 'tracking' folder (at the same level as the 'mp4' folder)
     parent_dir = os.path.dirname(videos_dir.rstrip('/\\'))
-    tracking_dir = os.path.join(parent_dir, "tracking")
+    tracking_dir = os.path.join(parent_dir, "tracking2")
 
     merged_dfs_dict = {}
 
