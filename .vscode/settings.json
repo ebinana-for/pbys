@@ -1,5 +1,6 @@
 {
     "cmake.sourceDirectory": "/mnt/data/pbys/inference",
     "python-envs.defaultEnvManager": "ms-python.python:conda",
-    "python-envs.defaultPackageManager": "ms-python.python:conda"
+    "python-envs.defaultPackageManager": "ms-python.python:conda",
+    "python.defaultInterpreterPath": "/home/irystec/miniconda3/envs/probayes_training/bin/python"
 }
