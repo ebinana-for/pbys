@@ -15,7 +15,7 @@ import math
 import sys
 
 current_dir = os.path.dirname(os.path.abspath(__file__))
-root_dir = os.path.abspath(os.path.join(current_dir, "../../.."))
+root_dir = os.path.abspath(os.path.join(current_dir, "../../../../training/src"))
 if root_dir not in sys.path:
     sys.path.insert(0, root_dir)
 
@@ -135,7 +135,11 @@ def evaluate(video_dir, csv_dir, output_path, config):
             csv_path = os.path.join(csv_dir, f_root + ".csv")
             
             cap = cv2.VideoCapture(video_path)
-            df = pd.read_csv(csv_path, low_memory=False)
+            try:
+                df = pd.read_csv(csv_path, low_memory=False)
+            except pd.errors.EmptyDataError:
+                print(f"[Warning] Empty CSV, no detections: {csv_path}")
+                df = pd.DataFrame()
 
             count = 0
             file_results = []
@@ -201,7 +205,8 @@ def evaluate(video_dir, csv_dir, output_path, config):
                     df_id["score_gender_mean"] = -1
 
                 # C++ Boolean Trap
-                df_id.loc[~valid_mask, ["age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]] = -1
+                invalid_mask = df_id["age"] == -1
+                df_id.loc[invalid_mask, ["age_mean", "gender_mean", "score_gender_mean", "bbox_cx"]] = -1
                 df_id.fillna(-1, inplace=True)
                 
                 # Enforce C++ Integer types

@@ -1,0 +1,7 @@
+model:
+  checkpoint: /mnt/data/OoP/data/trained_models/age_gender/model_age_gender.onnx
+
+input:
+  input_height: 224
+  input_width: 192
+ 
